@@ -35,6 +35,17 @@ type PollVideoResult = {
 
 type CapturableVideoElement = HTMLVideoElement & {
   captureStream?: (frameRate?: number) => MediaStream
+  webkitCaptureStream?: (frameRate?: number) => MediaStream
+}
+
+type CapturableCanvasElement = HTMLCanvasElement & {
+  captureStream?: (frameRate?: number) => MediaStream
+}
+
+const captureVideoElementStream = (el: CapturableVideoElement, frameRate?: number) => {
+  if (typeof el.captureStream === 'function') return el.captureStream(frameRate)
+  if (typeof el.webkitCaptureStream === 'function') return el.webkitCaptureStream(frameRate)
+  return null
 }
 
 const VIDEO_MODELS: Record<VideoModel, VideoModelConfig> = {
@@ -75,6 +86,31 @@ const OAUTH_REDIRECT_URL =
   import.meta.env.VITE_SUPABASE_REDIRECT_URL ?? (typeof window !== 'undefined' ? window.location.origin : undefined)
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMessage: string) =>
+  new Promise<T>((resolve, reject) => {
+    let settled = false
+    const timer = window.setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(errorMessage))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 
 const makePipelineUsageId = () => {
   const timestamp = Date.now()
@@ -329,6 +365,174 @@ const buildPaddedDataUrl = (img: HTMLImageElement, targetWidth: number, targetHe
   return canvas.toDataURL('image/png')
 }
 
+const waitForVideoMetadata = (
+  el: HTMLVideoElement,
+  src: string,
+  errorMessage: string,
+  timeoutMs = 15_000,
+) =>
+  new Promise<void>((resolve, reject) => {
+    let settled = false
+    let timer: number | null = null
+
+    const cleanup = () => {
+      el.removeEventListener('loadedmetadata', onLoaded)
+      el.removeEventListener('error', onError)
+      if (timer !== null) {
+        window.clearTimeout(timer)
+      }
+    }
+
+    const finalizeResolve = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }
+
+    const finalizeReject = (message: string) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(new Error(message))
+    }
+
+    const onLoaded = () => finalizeResolve()
+    const onError = () => finalizeReject(errorMessage)
+
+    // Register listeners before assigning src so very small files do not miss the event.
+    el.addEventListener('loadedmetadata', onLoaded, { once: true })
+    el.addEventListener('error', onError, { once: true })
+    el.src = src
+
+    if (el.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      finalizeResolve()
+      return
+    }
+
+    el.load()
+    timer = window.setTimeout(() => finalizeReject(errorMessage), timeoutMs)
+  })
+
+const startMediaElementPlayback = async (el: HTMLMediaElement, timeoutMs = 2_000) => {
+  try {
+    const playResult = el.play()
+    if (playResult && typeof (playResult as Promise<void>).then === 'function') {
+      await Promise.race([playResult, wait(timeoutMs)])
+    }
+  } catch {
+    // Autoplay restrictions or transient playback failures should not block final mux.
+  }
+}
+
+type SyncedVideoPlayerProps = {
+  videoSrc: string
+  audioSrc: string
+}
+
+const SyncedVideoPlayer = ({ videoSrc, audioSrc }: SyncedVideoPlayerProps) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    const videoEl = videoRef.current
+    const audioEl = audioRef.current
+    if (!videoEl || !audioEl) return
+
+    let isSyncing = false
+
+    const syncTime = () => {
+      if (isSyncing) return
+      if (!Number.isFinite(videoEl.currentTime) || !Number.isFinite(audioEl.currentTime)) return
+      const drift = Math.abs(videoEl.currentTime - audioEl.currentTime)
+      if (drift < 0.12) return
+      isSyncing = true
+      try {
+        audioEl.currentTime = videoEl.currentTime
+      } finally {
+        isSyncing = false
+      }
+    }
+
+    const syncPlaybackState = async () => {
+      syncTime()
+      audioEl.playbackRate = videoEl.playbackRate
+      audioEl.volume = videoEl.volume
+      audioEl.muted = videoEl.muted
+      if (!videoEl.paused) {
+        try {
+          await audioEl.play()
+        } catch {
+          // Ignore autoplay/playback race failures; next user interaction will retry.
+        }
+      }
+    }
+
+    const handlePause = () => {
+      audioEl.pause()
+      syncTime()
+    }
+
+    const handleEnded = () => {
+      audioEl.pause()
+      audioEl.currentTime = 0
+    }
+
+    const handleVolumeChange = () => {
+      audioEl.volume = videoEl.volume
+      audioEl.muted = videoEl.muted
+    }
+
+    const handleRateChange = () => {
+      audioEl.playbackRate = videoEl.playbackRate
+    }
+
+    const handleSeeked = () => {
+      syncTime()
+      if (!videoEl.paused) {
+        void audioEl.play().catch(() => undefined)
+      }
+    }
+
+    videoEl.addEventListener('play', syncPlaybackState)
+    videoEl.addEventListener('playing', syncPlaybackState)
+    videoEl.addEventListener('pause', handlePause)
+    videoEl.addEventListener('seeking', syncTime)
+    videoEl.addEventListener('seeked', handleSeeked)
+    videoEl.addEventListener('timeupdate', syncTime)
+    videoEl.addEventListener('ratechange', handleRateChange)
+    videoEl.addEventListener('volumechange', handleVolumeChange)
+    videoEl.addEventListener('ended', handleEnded)
+
+    audioEl.preload = 'auto'
+    audioEl.currentTime = 0
+    audioEl.playbackRate = videoEl.playbackRate
+    audioEl.volume = videoEl.volume
+    audioEl.muted = videoEl.muted
+
+    return () => {
+      videoEl.removeEventListener('play', syncPlaybackState)
+      videoEl.removeEventListener('playing', syncPlaybackState)
+      videoEl.removeEventListener('pause', handlePause)
+      videoEl.removeEventListener('seeking', syncTime)
+      videoEl.removeEventListener('seeked', handleSeeked)
+      videoEl.removeEventListener('timeupdate', syncTime)
+      videoEl.removeEventListener('ratechange', handleRateChange)
+      videoEl.removeEventListener('volumechange', handleVolumeChange)
+      videoEl.removeEventListener('ended', handleEnded)
+      audioEl.pause()
+      audioEl.currentTime = 0
+    }
+  }, [audioSrc, videoSrc])
+
+  return (
+    <>
+      <video ref={videoRef} controls src={videoSrc} />
+      <audio ref={audioRef} src={audioSrc} />
+    </>
+  )
+}
+
 export function Video() {
   const [sourcePreview, setSourcePreview] = useState<string | null>(null)
   const [sourcePayload, setSourcePayload] = useState<string | null>(null)
@@ -340,6 +544,7 @@ export function Video() {
   const [width, setWidth] = useState(832)
   const [height, setHeight] = useState(576)
   const [displayVideo, setDisplayVideo] = useState<string | null>(null)
+  const [displayAudioVideo, setDisplayAudioVideo] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
@@ -360,14 +565,6 @@ export function Video() {
   const accessToken = session?.access_token ?? ''
   const selectedVideoModel = VIDEO_MODELS[videoModel] ?? VIDEO_MODELS[DEFAULT_VIDEO_MODEL]
   const selectedVideoLength = useMemo(() => resolveVideoLengthOption(videoLengthSeconds), [videoLengthSeconds])
-  const mediaMixSupported = useMemo(() => {
-    if (typeof window === 'undefined') return false
-    const hasMediaRecorder = typeof window.MediaRecorder !== 'undefined'
-    const hasCaptureStream =
-      typeof HTMLVideoElement !== 'undefined' &&
-      typeof (HTMLVideoElement.prototype as CapturableVideoElement).captureStream === 'function'
-    return hasMediaRecorder && hasCaptureStream
-  }, [])
   const hasSfxPrompt = sfxPrompt.trim().length > 0
   const audioPipelineCost = hasSfxPrompt ? 1 : 0
   const requiredPoints = selectedVideoLength.ticketCost + audioPipelineCost
@@ -725,6 +922,45 @@ export function Video() {
     throw new Error('効果音付き動画の生成がタイムアウトしました。')
   }, [accessToken])
 
+  const runMMAudioMuxPipeline = useCallback(
+    async (baseVideoSource: string, audioVideoSource: string, pipelineUsageId: string) => {
+      const baseVideoBase64 = await sourceToBase64(baseVideoSource)
+      const audioVideoBase64 = await sourceToBase64(audioVideoSource)
+      const baseVideoExt = inferVideoExt(baseVideoSource)
+      const audioVideoExt = inferVideoExt(audioVideoSource)
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`
+      }
+
+      const res = await fetch('/api/mmaudio', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          input: {
+            mux_only: true,
+            pipeline_usage_id: pipelineUsageId,
+            base_video_base64: baseVideoBase64,
+            base_video_ext: baseVideoExt,
+            audio_video_base64: audioVideoBase64,
+            audio_video_ext: audioVideoExt,
+          },
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(normalizeErrorMessage(extractErrorMessage(data) || '動画と効果音の保存用結合に失敗しました。'))
+      }
+
+      const muxedVideo = extractVideo(data)
+      if (!muxedVideo) {
+        throw new Error('動画と効果音の結合結果を取得できませんでした。')
+      }
+      return muxedVideo
+    },
+    [accessToken],
+  )
+
   const mixVideoWithAudioTracks = useCallback(
     async (
       videoSource: string,
@@ -742,124 +978,167 @@ export function Video() {
       if (runIdRef.current !== runId) return null
 
       const videoEl = document.createElement('video')
-      videoEl.src = videoDataUrl
       videoEl.preload = 'auto'
       videoEl.muted = true
       videoEl.playsInline = true
 
       const fxAudioEl = fxAudioVideoDataUrl ? document.createElement('video') : null
-      if (fxAudioEl && fxAudioVideoDataUrl) {
-        fxAudioEl.src = fxAudioVideoDataUrl
+      if (fxAudioEl) {
         fxAudioEl.preload = 'auto'
         fxAudioEl.muted = false
         fxAudioEl.playsInline = true
       }
 
-      const metadataTasks: Promise<void>[] = [
-        new Promise<void>((resolve, reject) => {
-          videoEl.onloadedmetadata = () => resolve()
-          videoEl.onerror = () => reject(new Error('動画メタデータの読み込みに失敗しました。'))
-        }),
-      ]
-      if (fxAudioEl) {
-        metadataTasks.push(
-          new Promise<void>((resolve, reject) => {
-            fxAudioEl.onloadedmetadata = () => resolve()
-            fxAudioEl.onerror = () => reject(new Error('効果音動画メタデータの読み込みに失敗しました。'))
-          }),
-        )
-      }
-      await Promise.all(metadataTasks)
+      let sourceStream: MediaStream | null = null
+      let mixedStream: MediaStream | null = null
+      let audioContext: AudioContext | null = null
+      let recorder: MediaRecorder | null = null
+      let rafId = 0
 
-      const sourceWidth = Math.max(2, Math.floor(videoEl.videoWidth || 0))
-      const sourceHeight = Math.max(2, Math.floor(videoEl.videoHeight || 0))
-      if (!sourceWidth || !sourceHeight) {
-        throw new Error('動画サイズを取得できませんでした。')
-      }
-
-      const capturableVideoEl = videoEl as CapturableVideoElement
-      if (typeof capturableVideoEl.captureStream !== 'function') {
-        throw new Error('このブラウザは最終合成に対応していません。')
-      }
-
-      // Force element display size to intrinsic size before capture to avoid accidental downscale/crop.
-      videoEl.width = sourceWidth
-      videoEl.height = sourceHeight
-      videoEl.style.width = `${sourceWidth}px`
-      videoEl.style.height = `${sourceHeight}px`
-
-      const sourceStream = capturableVideoEl.captureStream(FIXED_FPS)
-      const videoTrack = sourceStream.getVideoTracks()[0]
-      if (!videoTrack) {
-        throw new Error('動画トラックを取得できませんでした。')
-      }
-
-      const audioContext = new AudioContext()
-      const destination = audioContext.createMediaStreamDestination()
-      const videoSourceNode = audioContext.createMediaElementSource(videoEl)
-      const videoGain = audioContext.createGain()
-      videoGain.gain.value = 1
-      if (fxAudioEl) {
-        const fxSourceNode = audioContext.createMediaElementSource(fxAudioEl)
-        const fxGain = audioContext.createGain()
-        fxGain.gain.value = 1
-        fxSourceNode.connect(fxGain).connect(destination)
-      } else {
-        videoSourceNode.connect(videoGain).connect(destination)
-      }
-
-      const mixedStream = new MediaStream()
-      mixedStream.addTrack(videoTrack)
-      const mixedAudioTrack = destination.stream.getAudioTracks()[0]
-      if (mixedAudioTrack) {
-        mixedStream.addTrack(mixedAudioTrack)
-      }
-
-      const mimeType = MIX_EXPORT_MIME_CANDIDATES.find((item) => MediaRecorder.isTypeSupported(item)) ?? 'video/webm'
-      const recorder = new MediaRecorder(mixedStream, { mimeType, videoBitsPerSecond: 8_000_000 })
-      const chunks: BlobPart[] = []
-
-      const stopPromise = new Promise<void>((resolve, reject) => {
-        recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) chunks.push(event.data)
+      try {
+        const metadataTasks: Promise<void>[] = [
+          waitForVideoMetadata(videoEl, videoDataUrl, '動画メタデータの読み込みに失敗しました。'),
+        ]
+        if (fxAudioEl && fxAudioVideoDataUrl) {
+          metadataTasks.push(
+            waitForVideoMetadata(fxAudioEl, fxAudioVideoDataUrl, '効果音動画メタデータの読み込みに失敗しました。'),
+          )
         }
-        recorder.onstop = () => resolve()
-        recorder.onerror = () => reject(new Error('最終動画の録画に失敗しました。'))
-      })
+        await withTimeout(
+          Promise.all(metadataTasks),
+          20_000,
+          '動画メタデータの取得がタイムアウトしました。ブラウザを再読み込みして再試行してください。',
+        )
 
-      recorder.start(1000)
-      await audioContext.resume()
-      videoEl.currentTime = 0
-      if (fxAudioEl) fxAudioEl.currentTime = 0
-      const playTasks: Promise<unknown>[] = [videoEl.play()]
-      if (fxAudioEl) playTasks.push(fxAudioEl.play())
-      await Promise.allSettled(playTasks)
+        const sourceWidth = Math.max(2, Math.floor(videoEl.videoWidth || 0))
+        const sourceHeight = Math.max(2, Math.floor(videoEl.videoHeight || 0))
+        if (!sourceWidth || !sourceHeight) {
+          throw new Error('動画サイズを取得できませんでした。')
+        }
 
-      await new Promise<void>((resolve) => {
+        const mixCanvas = document.createElement('canvas')
+        mixCanvas.width = sourceWidth
+        mixCanvas.height = sourceHeight
+        const mixCtx = mixCanvas.getContext('2d')
+        if (!mixCtx) {
+          throw new Error('最終合成用のキャンバスを初期化できませんでした。')
+        }
+
+        const capturableCanvas = mixCanvas as CapturableCanvasElement
+        const capturableVideoEl = videoEl as CapturableVideoElement
+        sourceStream =
+          (typeof capturableCanvas.captureStream === 'function'
+            ? capturableCanvas.captureStream(FIXED_FPS)
+            : captureVideoElementStream(capturableVideoEl, FIXED_FPS))
+        if (!sourceStream) {
+          throw new Error('このブラウザは最終合成に対応していません。')
+        }
+        const videoTrack = sourceStream.getVideoTracks()[0]
+        if (!videoTrack) {
+          throw new Error('動画トラックを取得できませんでした。')
+        }
+
+        const renderFrame = () => {
+          if (videoEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            mixCtx.drawImage(videoEl, 0, 0, sourceWidth, sourceHeight)
+          }
+          rafId = window.requestAnimationFrame(renderFrame)
+        }
+        renderFrame()
+
+        audioContext = new AudioContext()
+        const destination = audioContext.createMediaStreamDestination()
+        const videoSourceNode = audioContext.createMediaElementSource(videoEl)
+        const videoGain = audioContext.createGain()
+        videoGain.gain.value = fxAudioEl ? 0 : 1
+        videoSourceNode.connect(videoGain).connect(destination)
+        if (fxAudioEl) {
+          const fxSourceNode = audioContext.createMediaElementSource(fxAudioEl)
+          const fxGain = audioContext.createGain()
+          fxGain.gain.value = 1
+          fxSourceNode.connect(fxGain).connect(destination)
+        }
+        if (audioContext.state === 'suspended') {
+          void audioContext.resume().catch(() => undefined)
+        }
+
+        mixedStream = new MediaStream()
+        mixedStream.addTrack(videoTrack)
+        const mixedAudioTrack = destination.stream.getAudioTracks()[0]
+        if (mixedAudioTrack) {
+          mixedStream.addTrack(mixedAudioTrack)
+        }
+
+        const mimeType = MIX_EXPORT_MIME_CANDIDATES.find((item) => MediaRecorder.isTypeSupported(item)) ?? 'video/webm'
+        recorder = new MediaRecorder(mixedStream, { mimeType, videoBitsPerSecond: 8_000_000 })
+        const chunks: BlobPart[] = []
+
+        const stopPromise = new Promise<void>((resolve, reject) => {
+          recorder!.ondataavailable = (event) => {
+            if (event.data.size > 0) chunks.push(event.data)
+          }
+          recorder!.onstop = () => resolve()
+          recorder!.onerror = () => reject(new Error('最終動画の録画に失敗しました。'))
+        })
+
+        videoEl.currentTime = 0
+        if (fxAudioEl) fxAudioEl.currentTime = 0
+        recorder.start(1000)
+        await withTimeout(startMediaElementPlayback(videoEl), 3_000, '動画再生の開始に失敗しました。')
+        if (fxAudioEl) {
+          await withTimeout(startMediaElementPlayback(fxAudioEl), 3_000, '効果音再生の開始に失敗しました。')
+        }
+
         const requestedDurationMs =
           typeof targetSeconds === 'number' && Number.isFinite(targetSeconds) && targetSeconds > 0
             ? Math.floor(targetSeconds * 1000)
             : null
         const naturalDurationMs = Number.isFinite(videoEl.duration) ? Math.floor(videoEl.duration * 1000) : null
-        const stopAfterMs = Math.max(1000, requestedDurationMs ?? naturalDurationMs ?? 15000)
-        const timer = window.setTimeout(resolve, stopAfterMs)
-        videoEl.onended = () => {
-          window.clearTimeout(timer)
-          resolve()
+        const stopAfterMs = Math.max(1000, requestedDurationMs ?? naturalDurationMs ?? 15_000)
+
+        await withTimeout(
+          new Promise<void>((resolve) => {
+            const timer = window.setTimeout(resolve, stopAfterMs)
+            videoEl.onended = () => {
+              window.clearTimeout(timer)
+              resolve()
+            }
+          }),
+          stopAfterMs + 2_500,
+          '最終合成の再生待機がタイムアウトしました。',
+        )
+
+        if (recorder.state !== 'inactive') recorder.stop()
+        await withTimeout(stopPromise, 6_000, '最終動画の録画停止がタイムアウトしました。')
+
+        const mixedBlob = new Blob(chunks, { type: mimeType })
+        if (mixedBlob.size === 0) {
+          throw new Error('最終動画のデータが空でした。')
         }
-      })
-
-      videoEl.pause()
-      if (fxAudioEl) fxAudioEl.pause()
-      if (recorder.state !== 'inactive') recorder.stop()
-      await stopPromise
-
-      sourceStream.getTracks().forEach((track: MediaStreamTrack) => track.stop())
-      mixedStream.getTracks().forEach((track: MediaStreamTrack) => track.stop())
-      await audioContext.close().catch(() => undefined)
-
-      const mixedBlob = new Blob(chunks, { type: mimeType })
-      return URL.createObjectURL(mixedBlob)
+        return URL.createObjectURL(mixedBlob)
+      } finally {
+        if (rafId) window.cancelAnimationFrame(rafId)
+        videoEl.pause()
+        if (fxAudioEl) fxAudioEl.pause()
+        videoEl.removeAttribute('src')
+        videoEl.load()
+        if (fxAudioEl) {
+          fxAudioEl.removeAttribute('src')
+          fxAudioEl.load()
+        }
+        if (recorder && recorder.state !== 'inactive') {
+          try {
+            recorder.stop()
+          } catch {
+            // no-op
+          }
+        }
+        sourceStream?.getTracks().forEach((track: MediaStreamTrack) => track.stop())
+        mixedStream?.getTracks().forEach((track: MediaStreamTrack) => track.stop())
+        if (audioContext) {
+          await audioContext.close().catch(() => undefined)
+        }
+      }
     },
     [],
   )
@@ -877,6 +1156,7 @@ export function Video() {
       setIsRunning(true)
       setStatusMessage('動画を生成中です…')
       setDisplayVideo(null)
+      setDisplayAudioVideo(null)
       let fallbackVideo: string | null = null
 
       try {
@@ -904,6 +1184,7 @@ export function Video() {
 
         if (!shouldRunSfx) {
           setDisplayVideo(baseVideo)
+          setDisplayAudioVideo(null)
           setStatusMessage('動画生成が完了しました。')
           if (accessToken) {
             await fetchTickets(accessToken)
@@ -916,19 +1197,18 @@ export function Video() {
           setStatusMessage('効果音付き動画を生成中です…')
           const fxVideo = await runMMAudioPipeline(baseVideo, trimmedSfx, runId, pipelineUsageId)
           if (!fxVideo || runIdRef.current !== runId) return
-          pipelineVideo = fxVideo
-          fallbackVideo = pipelineVideo
-
-          // Keep the original generated visuals and only borrow the SFX audio track.
-          if (mediaMixSupported) {
-            setStatusMessage('動画と効果音を合成中です…')
-            const mixedWithSfx = await mixVideoWithAudioTracks(baseVideo, runId, {
-              fxAudioVideoSource: fxVideo,
-              targetSeconds: selectedVideoLength.seconds,
-            })
-            if (!mixedWithSfx || runIdRef.current !== runId) return
-            pipelineVideo = mixedWithSfx
+          setStatusMessage('動画と効果音を保存用に結合中です…')
+          try {
+            const muxedVideo = await runMMAudioMuxPipeline(baseVideo, fxVideo, pipelineUsageId)
+            if (runIdRef.current !== runId) return
+            pipelineVideo = muxedVideo
             fallbackVideo = pipelineVideo
+            setDisplayAudioVideo(null)
+          } catch {
+            if (runIdRef.current !== runId) return
+            pipelineVideo = baseVideo
+            fallbackVideo = pipelineVideo
+            setDisplayAudioVideo(fxVideo)
           }
         }
 
@@ -958,10 +1238,9 @@ export function Video() {
     [
       accessToken,
       fetchTickets,
-      mixVideoWithAudioTracks,
       pollJob,
+      runMMAudioMuxPipeline,
       runMMAudioPipeline,
-      mediaMixSupported,
       session,
       sfxPrompt,
       submitVideo,
@@ -974,6 +1253,7 @@ export function Video() {
     setSourcePayload(null)
     setSourceName('')
     setDisplayVideo(null)
+    setDisplayAudioVideo(null)
     setStatusMessage('')
     setIsPreviewMode(false)
   }, [])
@@ -1036,7 +1316,7 @@ export function Video() {
   }
 
   const handleSaveResult = useCallback(async () => {
-    if (!displayVideo || isSavingResult) return
+    if (!displayVideo || displayAudioVideo || isSavingResult) return
     setIsSavingResult(true)
     try {
       await saveGeneratedAsset({
@@ -1047,7 +1327,7 @@ export function Video() {
     } finally {
       setIsSavingResult(false)
     }
-  }, [displayVideo, isGif, isSavingResult])
+  }, [displayAudioVideo, displayVideo, isGif, isSavingResult])
 
   if (!authReady) {
     return (
@@ -1310,15 +1590,23 @@ export function Video() {
                 </div>
               ) : displayVideo ? (
                 <div className="studio-result-media">
-                  <button
-                    type="button"
-                    className="studio-save-btn"
-                    onClick={handleSaveResult}
-                    disabled={isSavingResult}
-                  >
-                    {isSavingResult ? 'Saving...' : 'Save'}
-                  </button>
-                  {isGif ? <img src={displayVideo} alt="Generated video" /> : <video controls src={displayVideo} />}
+                  {!displayAudioVideo && (
+                    <button
+                      type="button"
+                      className="studio-save-btn"
+                      onClick={handleSaveResult}
+                      disabled={isSavingResult}
+                    >
+                      {isSavingResult ? 'Saving...' : 'Save'}
+                    </button>
+                  )}
+                  {isGif ? (
+                    <img src={displayVideo} alt="Generated video" />
+                  ) : displayAudioVideo ? (
+                    <SyncedVideoPlayer videoSrc={displayVideo} audioSrc={displayAudioVideo} />
+                  ) : (
+                    <video controls src={displayVideo} />
+                  )}
                 </div>
               ) : (
                 <div className="studio-preview-idle">

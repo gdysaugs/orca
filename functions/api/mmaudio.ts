@@ -27,6 +27,9 @@ const ERR_VIDEO_REQUIRED = '動画データを入力してください。'
 const ERR_VIDEO_TOO_LARGE = `video is too large (max ${MAX_VIDEO_BYTES / (1024 * 1024)}MB).`
 const ERR_REQUEST_FAILED = '音声演出のリクエストに失敗しました。'
 const ERR_STATUS_FAILED = '音声演出の状態確認に失敗しました。'
+const ERR_MUX_VIDEO_REQUIRED = '結合元の動画データが必要です。'
+const ERR_MUX_AUDIO_VIDEO_REQUIRED = '音声付き動画データが必要です。'
+const ERR_MUX_FAILED = '動画と音声の結合に失敗しました。'
 
 const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -565,6 +568,63 @@ const buildDefaultWorkflow = (
   }
 }
 
+const buildMuxWorkflow = (videoFilename: string, audioVideoFilename: string) => {
+  return {
+    '201': {
+      class_type: 'VHS_LoadVideo',
+      inputs: {
+        video: videoFilename,
+        force_rate: 0,
+        force_size: 'Disabled',
+        custom_width: 512,
+        custom_height: 512,
+        frame_load_cap: 0,
+        skip_first_frames: 0,
+        select_every_nth: 1,
+      },
+      _meta: { title: 'VHS_LoadVideo_Base' },
+    },
+    '202': {
+      class_type: 'VHS_LoadVideo',
+      inputs: {
+        video: audioVideoFilename,
+        force_rate: 0,
+        force_size: 'Disabled',
+        custom_width: 512,
+        custom_height: 512,
+        frame_load_cap: 0,
+        skip_first_frames: 0,
+        select_every_nth: 1,
+      },
+      _meta: { title: 'VHS_LoadVideo_AudioSource' },
+    },
+    '203': {
+      class_type: 'VHS_VideoInfo',
+      inputs: {
+        video_info: ['201', 3],
+      },
+      _meta: { title: 'VHS_VideoInfo_Base' },
+    },
+    '204': {
+      class_type: 'VHS_VideoCombine',
+      inputs: {
+        images: ['201', 0],
+        audio: ['202', 2],
+        frame_rate: ['203', 5],
+        loop_count: 0,
+        filename_prefix: 'MMAudioMux',
+        format: 'video/h264-mp4',
+        pingpong: false,
+        save_output: false,
+        pix_fmt: 'yuv420p',
+        crf: 19,
+        save_metadata: true,
+      },
+      _meta: { title: 'VHS_VideoCombine_Mux' },
+    },
+  }
+}
+
 const extractRunpodStatus = (payload: any) => {
   const raw = payload?.status ?? payload?.state ?? payload?.output?.status ?? payload?.result?.status
   return raw ? String(raw).toUpperCase() : 'UNKNOWN'
@@ -586,7 +646,7 @@ const extractError = (payload: any) =>
   payload?.result?.error ||
   payload?.result?.message
 
-const extractVideoOutput = (payload: any) => {
+const extractVideoOutput = (payload: any, options?: { filenamePrefix?: string }) => {
   const roots = [
     payload,
     payload?.output,
@@ -597,10 +657,12 @@ const extractVideoOutput = (payload: any) => {
     payload?.result?.result,
   ]
 
-  let outputBase64 = ''
-  let outputFilename: string | null = null
-  let outputSizeBytes: number | null = null
-  let runtime: unknown = null
+  const candidates: Array<{
+    outputBase64: string
+    outputFilename: string | null
+    outputSizeBytes: number | null
+    runtime: unknown
+  }> = []
 
   const listKeys = ['videos', 'outputs', 'output_videos', 'gifs', 'images']
 
@@ -612,11 +674,13 @@ const extractVideoOutput = (payload: any) => {
       normalizeBase64(root?.video_base64) ||
       normalizeBase64(root?.video) ||
       normalizeBase64(root?.data)
-    if (!outputBase64 && direct) {
-      outputBase64 = direct
-      outputFilename = outputFilename ?? (root?.output_filename ? String(root.output_filename) : null)
-      outputSizeBytes = Number.isFinite(Number(root?.output_size_bytes)) ? Number(root.output_size_bytes) : outputSizeBytes
-      runtime = root?.runtime ?? runtime
+    if (direct) {
+      candidates.push({
+        outputBase64: direct,
+        outputFilename: root?.output_filename ? String(root.output_filename) : null,
+        outputSizeBytes: Number.isFinite(Number(root?.output_size_bytes)) ? Number(root.output_size_bytes) : null,
+        runtime: root?.runtime ?? null,
+      })
     }
 
     for (const key of listKeys) {
@@ -626,25 +690,27 @@ const extractVideoOutput = (payload: any) => {
         if (!item || typeof item !== 'object') continue
         const nested = normalizeBase64(item?.video ?? item?.data ?? item?.url ?? item?.output_base64 ?? item?.video_base64)
         if (!nested) continue
-        outputBase64 = nested
-        outputFilename = item?.filename ? String(item.filename) : outputFilename
-        outputSizeBytes = Number.isFinite(Number(item?.size_bytes)) ? Number(item.size_bytes) : outputSizeBytes
-        break
+        candidates.push({
+          outputBase64: nested,
+          outputFilename: item?.filename ? String(item.filename) : null,
+          outputSizeBytes: Number.isFinite(Number(item?.size_bytes)) ? Number(item.size_bytes) : null,
+          runtime: root?.runtime ?? null,
+        })
       }
-      if (outputBase64) break
     }
-
-    outputFilename = outputFilename ?? (root?.output_filename ? String(root.output_filename) : null)
-    outputSizeBytes = Number.isFinite(Number(root?.output_size_bytes)) ? Number(root.output_size_bytes) : outputSizeBytes
-    runtime = root?.runtime ?? runtime
-    if (outputBase64) break
   }
 
+  const normalizedPrefix = options?.filenamePrefix?.trim().toLowerCase()
+  const preferred =
+    (normalizedPrefix
+      ? candidates.find((candidate) => candidate.outputFilename?.toLowerCase().startsWith(normalizedPrefix))
+      : null) ?? candidates[0]
+
   return {
-    outputBase64,
-    outputFilename,
-    outputSizeBytes,
-    runtime,
+    outputBase64: preferred?.outputBase64 ?? '',
+    outputFilename: preferred?.outputFilename ?? null,
+    outputSizeBytes: preferred?.outputSizeBytes ?? null,
+    runtime: preferred?.runtime ?? null,
   }
 }
 
@@ -712,6 +778,106 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   if (input?.workflow) {
     return jsonResponse({ error: 'workflow overrides are not allowed.' }, 400, corsHeaders)
+  }
+
+  const isMuxOnly = parseOptionalBoolean(input?.mux_only ?? input?.muxOnly) === true
+  if (isMuxOnly) {
+    if (!pipelineUsageId) {
+      return jsonResponse({ error: 'pipeline_usage_id is required for mux_only.' }, 400, corsHeaders)
+    }
+
+    const ownership = await ensureUsageOwnership(auth.admin, auth.user, pipelineUsageId, corsHeaders)
+    if ('response' in ownership) return ownership.response
+
+    const baseVideoBase64 = normalizeBase64(
+      input?.base_video_base64 ?? input?.baseVideoBase64 ?? input?.video_base64 ?? input?.videoBase64,
+    )
+    if (!baseVideoBase64) {
+      return jsonResponse({ error: ERR_MUX_VIDEO_REQUIRED }, 400, corsHeaders)
+    }
+
+    const audioVideoBase64 = normalizeBase64(
+      input?.audio_video_base64 ?? input?.audioVideoBase64 ?? input?.audio_video ?? input?.audioVideo,
+    )
+    if (!audioVideoBase64) {
+      return jsonResponse({ error: ERR_MUX_AUDIO_VIDEO_REQUIRED }, 400, corsHeaders)
+    }
+
+    const baseVideoBytes = estimateBase64Bytes(baseVideoBase64)
+    const audioVideoBytes = estimateBase64Bytes(audioVideoBase64)
+    if (baseVideoBytes > MAX_VIDEO_BYTES || audioVideoBytes > MAX_VIDEO_BYTES || baseVideoBytes + audioVideoBytes > MAX_VIDEO_BYTES * 2) {
+      return jsonResponse({ error: ERR_VIDEO_TOO_LARGE }, 413, corsHeaders)
+    }
+
+    const baseVideoExt = normalizeVideoExt(input?.base_video_ext ?? input?.baseVideoExt ?? '.mp4')
+    const audioVideoExt = normalizeVideoExt(input?.audio_video_ext ?? input?.audioVideoExt ?? '.mp4')
+    const baseVideoName = String(input?.base_video_name ?? input?.baseVideoName ?? `base${baseVideoExt}`).trim() || `base${baseVideoExt}`
+    const audioVideoName =
+      String(input?.audio_video_name ?? input?.audioVideoName ?? `audio-source${audioVideoExt}`).trim() || `audio-source${audioVideoExt}`
+
+    const muxRunResult = await requestRunpod(endpoint, '/runsync', runpodApiKey, {
+      method: 'POST',
+      body: JSON.stringify({
+        input: {
+          workflow: buildMuxWorkflow(baseVideoName, audioVideoName),
+          uploads: [
+            {
+              name: baseVideoName,
+              data: baseVideoBase64,
+              mime: extensionToMime(baseVideoExt),
+            },
+            {
+              name: audioVideoName,
+              data: audioVideoBase64,
+              mime: extensionToMime(audioVideoExt),
+            },
+          ],
+        },
+      }),
+    }).catch(() => null)
+
+    if (!muxRunResult || !muxRunResult.ok) {
+      return jsonResponse(
+        {
+          error: ERR_MUX_FAILED,
+          upstream_status: muxRunResult?.status ?? null,
+        },
+        502,
+        corsHeaders,
+      )
+    }
+
+    const muxStatus = extractRunpodStatus(muxRunResult.payload)
+    if (isFailureStatus(muxStatus) || extractError(muxRunResult.payload)) {
+      return jsonResponse(
+        {
+          error: extractError(muxRunResult.payload) || ERR_MUX_FAILED,
+          status: muxStatus,
+        },
+        502,
+        corsHeaders,
+      )
+    }
+
+    const muxOutput = extractVideoOutput(muxRunResult.payload, { filenamePrefix: 'MMAudioMux' })
+    const muxVideoMime = muxOutput.outputFilename?.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4'
+    const muxVideo = muxOutput.outputBase64 ? `data:${muxVideoMime};base64,${muxOutput.outputBase64}` : null
+    if (!muxVideo) {
+      return jsonResponse({ error: ERR_MUX_FAILED, status: muxStatus }, 502, corsHeaders)
+    }
+
+    return jsonResponse(
+      {
+        status: muxStatus,
+        output_filename: muxOutput.outputFilename,
+        output_size_bytes: muxOutput.outputSizeBytes,
+        runtime: muxOutput.runtime,
+        video: muxVideo,
+        message: 'mux completed',
+      },
+      200,
+      corsHeaders,
+    )
   }
 
   const ticketCheck = await ensureTicketAvailable(auth.admin, auth.user, MMAUDIO_TICKET_COST, corsHeaders)
@@ -814,7 +980,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (Number.isFinite(nextTickets)) ticketsLeft = nextTickets
   }
 
-  const output = extractVideoOutput(runResult.payload)
+  const output = extractVideoOutput(runResult.payload, { filenamePrefix: 'MMAudio' })
   const videoMime = output.outputFilename?.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4'
   const video = output.outputBase64 ? `data:${videoMime};base64,${output.outputBase64}` : null
 
@@ -898,7 +1064,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (Number.isFinite(nextTickets)) ticketsLeft = nextTickets
   }
 
-  const output = extractVideoOutput(payload)
+  const output = extractVideoOutput(payload, { filenamePrefix: 'MMAudio' })
   const videoMime = output.outputFilename?.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4'
   const video = output.outputBase64 ? `data:${videoMime};base64,${output.outputBase64}` : null
 
