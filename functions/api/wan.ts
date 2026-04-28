@@ -31,8 +31,8 @@ const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
   })
 
 const DEFAULT_LORA_PACK_ENDPOINT = 'https://api.runpod.ai/v2/rywgsws0odibjj'
-const LORA_PACK_STRENGTH_HIGH = 0.2
-const LORA_PACK_STRENGTH_LOW = 0.2
+const LORA_PACK_STRENGTH_HIGH = 0.1
+const LORA_PACK_STRENGTH_LOW = 0.1
 
 const LORA_PACK_HIGH_LORAS = [
   'iGoon - Blink_Back_Doggystyle_HIGH.safetensors',
