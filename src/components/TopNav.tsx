@@ -69,6 +69,9 @@ export function TopNav() {
         </NavLink>
       </div>
       <div className='top-nav__links'>
+        <a className='top-nav__link' href='https://satanai.org/' target='_blank' rel='noopener noreferrer'>
+          SatanAI
+        </a>
         <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/purchase'>
           ショップ
         </NavLink>
