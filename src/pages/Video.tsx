@@ -527,7 +527,7 @@ const SyncedVideoPlayer = ({ videoSrc, audioSrc }: SyncedVideoPlayerProps) => {
 
   return (
     <>
-      <video ref={videoRef} controls src={videoSrc} />
+      <video ref={videoRef} controls controlsList="nodownload" src={videoSrc} />
       <audio ref={audioRef} src={audioSrc} />
     </>
   )
@@ -1316,18 +1316,32 @@ export function Video() {
   }
 
   const handleSaveResult = useCallback(async () => {
-    if (!displayVideo || displayAudioVideo || isSavingResult) return
+    if (!displayVideo || isSavingResult) return
     setIsSavingResult(true)
+    let temporarySource: string | null = null
     try {
+      const sourceToSave = displayAudioVideo
+        ? await mixVideoWithAudioTracks(displayVideo, runIdRef.current, {
+            fxAudioVideoSource: displayAudioVideo,
+            targetSeconds: selectedVideoLength.seconds,
+          })
+        : displayVideo
+
+      if (!sourceToSave) return
+      temporarySource = displayAudioVideo && sourceToSave.startsWith('blob:') ? sourceToSave : null
+
       await saveGeneratedAsset({
-        source: displayVideo,
+        source: sourceToSave,
         filenamePrefix: 'akumaai-video',
-        fallbackExtension: isGif ? 'gif' : 'mp4',
+        fallbackExtension: displayAudioVideo ? 'webm' : isGif ? 'gif' : 'mp4',
       })
     } finally {
+      if (temporarySource) {
+        URL.revokeObjectURL(temporarySource)
+      }
       setIsSavingResult(false)
     }
-  }, [displayAudioVideo, displayVideo, isGif, isSavingResult])
+  }, [displayAudioVideo, displayVideo, isGif, isSavingResult, mixVideoWithAudioTracks, selectedVideoLength.seconds])
 
   if (!authReady) {
     return (
@@ -1590,22 +1604,20 @@ export function Video() {
                 </div>
               ) : displayVideo ? (
                 <div className="studio-result-media">
-                  {!displayAudioVideo && (
-                    <button
-                      type="button"
-                      className="studio-save-btn"
-                      onClick={handleSaveResult}
-                      disabled={isSavingResult}
-                    >
-                      {isSavingResult ? 'Saving...' : 'Save'}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="studio-save-btn"
+                    onClick={handleSaveResult}
+                    disabled={isSavingResult}
+                  >
+                    {isSavingResult ? 'Saving...' : 'Save'}
+                  </button>
                   {isGif ? (
                     <img src={displayVideo} alt="Generated video" />
                   ) : displayAudioVideo ? (
                     <SyncedVideoPlayer videoSrc={displayVideo} audioSrc={displayAudioVideo} />
                   ) : (
-                    <video controls src={displayVideo} />
+                    <video controls controlsList="nodownload" src={displayVideo} />
                   )}
                 </div>
               ) : (
