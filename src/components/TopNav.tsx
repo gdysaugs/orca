@@ -72,6 +72,9 @@ export function TopNav() {
         <a className='top-nav__link' href='https://satanai.org/' target='_blank' rel='noopener noreferrer'>
           SatanAI
         </a>
+        <a className='top-nav__link' href='https://devilai.win/' target='_blank' rel='noopener noreferrer'>
+          DevilAI
+        </a>
         <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/purchase'>
           ショップ
         </NavLink>
