@@ -11,6 +11,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
 import { isAuthConfigured, supabase } from '../lib/supabaseClient'
 import { saveGeneratedAsset } from '../lib/downloadMedia'
+import { fetchWithAuth } from '../lib/authFetch'
 import { TopNav } from '../components/TopNav'
 import './camera.css'
 import './video-studio.css'
@@ -759,7 +760,7 @@ export function Video() {
         headers.Authorization = `Bearer ${token}`
       }
 
-      const res = await fetch(selectedVideoModel.endpoint, {
+      const res = await fetchWithAuth(selectedVideoModel.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify({ input }),
@@ -818,7 +819,7 @@ export function Video() {
         mode: 'i2v',
         seconds: String(selectedVideoLength.seconds),
       })
-      const res = await fetch(`${selectedVideoModel.endpoint}?${params.toString()}`, { headers })
+      const res = await fetchWithAuth(`${selectedVideoModel.endpoint}?${params.toString()}`, { headers })
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
@@ -862,7 +863,7 @@ export function Video() {
     if (accessToken) {
       authHeaders.Authorization = `Bearer ${accessToken}`
     }
-    const res = await fetch('/api/mmaudio', {
+    const res = await fetchWithAuth('/api/mmaudio', {
       method: 'POST',
       headers: authHeaders,
       body: JSON.stringify({
@@ -895,7 +896,7 @@ export function Video() {
 
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return null
-      const pollRes = await fetch(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}${pipelineUsageId ? `&pipeline_usage_id=${encodeURIComponent(pipelineUsageId)}` : ``}`, {
+      const pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}${pipelineUsageId ? `&pipeline_usage_id=${encodeURIComponent(pipelineUsageId)}` : ``}`, {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
       })
       const pollData = await pollRes.json().catch(() => ({}))
@@ -933,7 +934,7 @@ export function Video() {
         headers.Authorization = `Bearer ${accessToken}`
       }
 
-      const res = await fetch('/api/mmaudio', {
+      const res = await fetchWithAuth('/api/mmaudio', {
         method: 'POST',
         headers,
         body: JSON.stringify({

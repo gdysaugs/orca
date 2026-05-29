@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { TopNav } from '../components/TopNav'
+import { fetchWithAuth } from '../lib/authFetch'
 import './camera.css'
 import './mmaudio.css'
 
@@ -179,7 +180,7 @@ export function MMAudio() {
         video_ext: sourceVideoExt,
       }
 
-      const res = await fetch('/api/mmaudio', {
+      const res = await fetchWithAuth('/api/mmaudio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),
@@ -207,7 +208,7 @@ export function MMAudio() {
       for (let i = 0; i < 180; i += 1) {
         if (runIdRef.current !== runId) return
 
-        const pollRes = await fetch(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}`)
+        const pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}`)
         const pollData = await pollRes.json().catch(() => ({}))
 
         if (!pollRes.ok) {
@@ -316,4 +317,3 @@ export function MMAudio() {
     </div>
   )
 }
-

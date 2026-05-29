@@ -21,19 +21,19 @@ export function Tokushoho() {
             </div>
             <div className="legal-row">
               <div className="legal-key">運営責任者</div>
-              <div className="legal-value">森世羅</div>
+              <div className="legal-value">必要があれば開示</div>
             </div>
             <div className="legal-row">
               <div className="legal-key">所在地</div>
-              <div className="legal-value">Section1,Changan East Road</div>
+              <div className="legal-value">必要があれば開示</div>
             </div>
             <div className="legal-row">
               <div className="legal-key">電話番号</div>
-              <div className="legal-value">090640001211</div>
+              <div className="legal-value">必要があれば開示</div>
             </div>
             <div className="legal-row">
               <div className="legal-key">問い合わせ先</div>
-              <div className="legal-value">サイト内問い合わせフォームまたは上記電話番号</div>
+              <div className="legal-value">サイト内問い合わせフォーム</div>
             </div>
             <div className="legal-row">
               <div className="legal-key">販売価格</div>

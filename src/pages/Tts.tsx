@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TopNav } from '../components/TopNav'
+import { fetchWithAuth } from '../lib/authFetch'
 import './camera.css'
 import './tts.css'
 
@@ -107,7 +108,7 @@ export function Tts() {
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return null
 
-      const res = await fetch(`/api/irodori?id=${encodeURIComponent(jobId)}`)
+      const res = await fetchWithAuth(`/api/irodori?id=${encodeURIComponent(jobId)}`)
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
@@ -151,7 +152,7 @@ export function Tts() {
         input.reference_text = referenceText.trim()
       }
 
-      const res = await fetch('/api/irodori', {
+      const res = await fetchWithAuth('/api/irodori', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { TopNav } from '../components/TopNav'
+import { fetchWithAuth } from '../lib/authFetch'
 import './camera.css'
 import './lipsync.css'
 
@@ -246,7 +247,7 @@ export function LipSync() {
         input.reference_text = voiceDesign.trim()
       }
 
-      const res = await fetch('/api/lipsync', {
+      const res = await fetchWithAuth('/api/lipsync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),
@@ -274,7 +275,7 @@ export function LipSync() {
       for (let i = 0; i < 180; i += 1) {
         if (runIdRef.current !== runId) return
 
-        const pollRes = await fetch(`/api/lipsync?id=${encodeURIComponent(String(jobId))}`)
+        const pollRes = await fetchWithAuth(`/api/lipsync?id=${encodeURIComponent(String(jobId))}`)
         const pollData = await pollRes.json().catch(() => ({}))
 
         if (!pollRes.ok) {
@@ -430,5 +431,4 @@ export function LipSync() {
     </div>
   )
 }
-
 
