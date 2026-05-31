@@ -626,15 +626,11 @@ export function Video() {
     })
   }, [])
 
-  const fetchTickets = useCallback(async (token: string) => {
-    if (!token) return null
-
+  const fetchTickets = useCallback(async () => {
     setTicketStatus('loading')
     setTicketMessage('')
 
-    const res = await fetch('/api/tickets', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const res = await fetchWithAuth('/api/tickets')
     const data = await res.json().catch(() => ({}))
 
     if (!res.ok) {
@@ -658,7 +654,7 @@ export function Video() {
       setTicketMessage('')
       return
     }
-    void fetchTickets(accessToken)
+    void fetchTickets()
   }, [accessToken, fetchTickets, session])
 
   useEffect(() => {
@@ -734,7 +730,7 @@ export function Video() {
   }, [isRunning])
 
   const submitVideo = useCallback(
-    async (imagePayload: string, token: string): Promise<SubmitVideoResult> => {
+    async (imagePayload: string): Promise<SubmitVideoResult> => {
       if (!imagePayload) throw new Error('画像が必要です。')
 
       const input: Record<string, unknown> = {
@@ -755,14 +751,9 @@ export function Video() {
       }
       input.image_base64 = imagePayload
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (token) {
-        headers.Authorization = `Bearer ${token}`
-      }
-
       const res = await fetchWithAuth(selectedVideoModel.endpoint, {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),
       })
       const data = await res.json().catch(() => ({}))
@@ -805,21 +796,16 @@ export function Video() {
     ],
   )
 
-  const pollJob = useCallback(async (jobId: string, runId: number, token?: string): Promise<PollVideoResult> => {
+  const pollJob = useCallback(async (jobId: string, runId: number): Promise<PollVideoResult> => {
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return { status: 'cancelled' as const, videos: [] }
-
-      const headers: Record<string, string> = {}
-      if (token) {
-        headers.Authorization = `Bearer ${token}`
-      }
 
       const params = new URLSearchParams({
         id: jobId,
         mode: 'i2v',
         seconds: String(selectedVideoLength.seconds),
       })
-      const res = await fetchWithAuth(`${selectedVideoModel.endpoint}?${params.toString()}`, { headers })
+      const res = await fetchWithAuth(`${selectedVideoModel.endpoint}?${params.toString()}`)
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
@@ -859,13 +845,9 @@ export function Video() {
   const runMMAudioPipeline = useCallback(async (videoSource: string, fxPrompt: string, runId: number, pipelineUsageId?: string) => {
     const videoBase64 = await sourceToBase64(videoSource)
     const videoExt = inferVideoExt(videoSource)
-    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (accessToken) {
-      authHeaders.Authorization = `Bearer ${accessToken}`
-    }
     const res = await fetchWithAuth('/api/mmaudio', {
       method: 'POST',
-      headers: authHeaders,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         input: {
           text: fxPrompt,
@@ -896,9 +878,7 @@ export function Video() {
 
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return null
-      const pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}${pipelineUsageId ? `&pipeline_usage_id=${encodeURIComponent(pipelineUsageId)}` : ``}`, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      })
+      const pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}${pipelineUsageId ? `&pipeline_usage_id=${encodeURIComponent(pipelineUsageId)}` : ``}`)
       const pollData = await pollRes.json().catch(() => ({}))
       if (!pollRes.ok) {
         const message = normalizeErrorMessage(extractErrorMessage(pollData) || '効果音付き動画の状態確認に失敗しました。')
@@ -921,7 +901,7 @@ export function Video() {
     }
 
     throw new Error('効果音付き動画の生成がタイムアウトしました。')
-  }, [accessToken])
+  }, [])
 
   const runMMAudioMuxPipeline = useCallback(
     async (baseVideoSource: string, audioVideoSource: string, pipelineUsageId: string) => {
@@ -929,14 +909,10 @@ export function Video() {
       const audioVideoBase64 = await sourceToBase64(audioVideoSource)
       const baseVideoExt = inferVideoExt(baseVideoSource)
       const audioVideoExt = inferVideoExt(audioVideoSource)
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (accessToken) {
-        headers.Authorization = `Bearer ${accessToken}`
-      }
 
       const res = await fetchWithAuth('/api/mmaudio', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input: {
             mux_only: true,
@@ -959,7 +935,7 @@ export function Video() {
       }
       return muxedVideo
     },
-    [accessToken],
+    [],
   )
 
   const mixVideoWithAudioTracks = useCallback(
@@ -1165,13 +1141,13 @@ export function Video() {
         const shouldRunSfx = trimmedSfx.length > 0
         const pipelineUsageId = shouldRunSfx ? makePipelineUsageId() : ''
         let baseVideo: string | null = null
-        const submitted = await submitVideo(imagePayload, accessToken)
+        const submitted = await submitVideo(imagePayload)
         if (runIdRef.current !== runId) return
 
         if ('videos' in submitted && Array.isArray(submitted.videos) && submitted.videos.length) {
           baseVideo = submitted.videos[0]
         } else if ('jobId' in submitted && typeof submitted.jobId === 'string' && submitted.jobId) {
-          const polled = await pollJob(submitted.jobId, runId, accessToken)
+          const polled = await pollJob(submitted.jobId, runId)
           if (runIdRef.current !== runId) return
           if (polled.status === 'done' && polled.videos.length) {
             baseVideo = polled.videos[0]
@@ -1188,7 +1164,7 @@ export function Video() {
           setDisplayAudioVideo(null)
           setStatusMessage('動画生成が完了しました。')
           if (accessToken) {
-            await fetchTickets(accessToken)
+            await fetchTickets()
           }
           return
         }
@@ -1217,7 +1193,7 @@ export function Video() {
         setStatusMessage('動画生成が完了しました。')
 
         if (accessToken) {
-          await fetchTickets(accessToken)
+          await fetchTickets()
         }
       } catch (error) {
         if (runIdRef.current !== runId) return
@@ -1300,7 +1276,7 @@ export function Video() {
 
     if (accessToken) {
       setStatusMessage('ポイントを確認中...')
-      const latestCount = await fetchTickets(accessToken)
+      const latestCount = await fetchTickets()
       if (latestCount !== null && latestCount < requiredPointsForRun) {
         setShowTicketModal(true)
         return

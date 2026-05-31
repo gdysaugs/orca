@@ -35,6 +35,7 @@ export const getFreshAccessToken = async () => {
 
 const withAuthHeader = async (headersInit?: HeadersInit, forceRefresh = false) => {
   const headers = new Headers(headersInit)
+  headers.delete('Authorization')
   const token = forceRefresh ? await refreshAccessToken() : await getFreshAccessToken()
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
