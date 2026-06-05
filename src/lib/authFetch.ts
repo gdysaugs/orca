@@ -20,7 +20,7 @@ export const getFreshAccessToken = async () => {
     const { data } = await supabase.auth.getSession()
     const session = data.session
     const token = session?.access_token ?? ''
-    if (!token) return ''
+    if (!token) return await refreshAccessToken()
 
     const expiresAtMs = Number(session?.expires_at ?? 0) * 1000
     if (expiresAtMs && expiresAtMs - Date.now() < REFRESH_WINDOW_MS) {
@@ -29,7 +29,7 @@ export const getFreshAccessToken = async () => {
 
     return token
   } catch {
-    return ''
+    return await refreshAccessToken()
   }
 }
 
@@ -44,9 +44,17 @@ const withAuthHeader = async (headersInit?: HeadersInit, forceRefresh = false) =
 }
 
 export const fetchWithAuth = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+  const firstHeaders = await withAuthHeader(init.headers)
+  if (!firstHeaders.has('Authorization')) {
+    return new Response(JSON.stringify({ error: 'ログインが必要です。' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const first = await fetch(input, {
     ...init,
-    headers: await withAuthHeader(init.headers),
+    headers: firstHeaders,
   })
 
   if (first.status !== 401) {

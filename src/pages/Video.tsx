@@ -317,6 +317,11 @@ const isFailureStatus = (status: string) => {
   return normalized.includes('fail') || normalized.includes('error') || normalized.includes('cancel')
 }
 
+const isRetryableStatusCheck = (status: number) => {
+  if (status === 0 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
+  return status >= 500
+}
+
 const extractJobId = (payload: any) => payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id
 
 const alignTo16 = (value: number) => Math.max(16, Math.round(value / 16) * 16)
@@ -797,6 +802,7 @@ export function Video() {
   )
 
   const pollJob = useCallback(async (jobId: string, runId: number): Promise<PollVideoResult> => {
+    let statusCheckFailures = 0
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return { status: 'cancelled' as const, videos: [] }
 
@@ -805,8 +811,20 @@ export function Video() {
         mode: 'i2v',
         seconds: String(selectedVideoLength.seconds),
       })
-      const res = await fetchWithAuth(`${selectedVideoModel.endpoint}?${params.toString()}`)
-      const data = await res.json().catch(() => ({}))
+      let res: Response
+      let data: any = {}
+      try {
+        res = await fetchWithAuth(`${selectedVideoModel.endpoint}?${params.toString()}`)
+        data = await res.json().catch(() => ({}))
+      } catch {
+        statusCheckFailures += 1
+        if (statusCheckFailures < 30) {
+          setStatusMessage('ステータス確認を再試行中です…')
+          await wait(2500 + i * 50)
+          continue
+        }
+        throw new Error('ステータス確認に失敗しました。')
+      }
 
       if (!res.ok) {
         const rawMessage = data?.error || data?.message || data?.detail || 'ステータス確認に失敗しました。'
@@ -816,9 +834,16 @@ export function Video() {
           setStatusMessage('ポイントが不足しています。')
           throw new Error('TICKET_SHORTAGE')
         }
+        if (isRetryableStatusCheck(res.status) && statusCheckFailures < 30) {
+          statusCheckFailures += 1
+          setStatusMessage('ステータス確認を再試行中です…')
+          await wait(2500 + i * 50)
+          continue
+        }
         setErrorModalMessage(message)
         throw new Error(message)
       }
+      statusCheckFailures = 0
 
       const nextTickets = Number(data?.ticketsLeft ?? data?.tickets_left)
       if (Number.isFinite(nextTickets)) {
@@ -876,10 +901,23 @@ export function Video() {
       throw new Error('効果音付き動画のジョブIDを取得できませんでした。')
     }
 
+    let statusCheckFailures = 0
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return null
-      const pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}${pipelineUsageId ? `&pipeline_usage_id=${encodeURIComponent(pipelineUsageId)}` : ``}`)
-      const pollData = await pollRes.json().catch(() => ({}))
+      let pollRes: Response
+      let pollData: any = {}
+      try {
+        pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}${pipelineUsageId ? `&pipeline_usage_id=${encodeURIComponent(pipelineUsageId)}` : ``}`)
+        pollData = await pollRes.json().catch(() => ({}))
+      } catch {
+        statusCheckFailures += 1
+        if (statusCheckFailures < 30) {
+          setStatusMessage('効果音の状態確認を再試行中です…')
+          await wait(2500 + i * 50)
+          continue
+        }
+        throw new Error('効果音付き動画の状態確認に失敗しました。')
+      }
       if (!pollRes.ok) {
         const message = normalizeErrorMessage(extractErrorMessage(pollData) || '効果音付き動画の状態確認に失敗しました。')
         if (isTicketShortage(pollRes.status, message)) {
@@ -887,8 +925,15 @@ export function Video() {
           setStatusMessage('ポイントが不足しています。')
           throw new Error('TICKET_SHORTAGE')
         }
+        if ((pollRes.status === 401 || isRetryableStatusCheck(pollRes.status)) && statusCheckFailures < 30) {
+          statusCheckFailures += 1
+          setStatusMessage('効果音の状態確認を再試行中です…')
+          await wait(2500 + i * 50)
+          continue
+        }
         throw new Error(message)
       }
+      statusCheckFailures = 0
 
       const maybeVideo = extractVideo(pollData)
       if (maybeVideo) return maybeVideo

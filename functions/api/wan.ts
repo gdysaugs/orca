@@ -912,9 +912,14 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       ? DEFAULT_VIDEO_TICKET_COST
       : usageTicketMeta?.ticketCost ?? statusDurationOption.ticketCost
 
-  const upstream = await fetch(`${endpoint}/status/${encodeURIComponent(id)}`, {
-    headers: { Authorization: `Bearer ${env.RUNPOD_API_KEY}` },
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(`${endpoint}/status/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${env.RUNPOD_API_KEY}` },
+    })
+  } catch {
+    return jsonResponse({ error: INTERNAL_SERVER_ERROR_MESSAGE }, 502, corsHeaders)
+  }
   const raw = await upstream.text()
   let payload: any = null
   let ticketsLeft: number | null = null
@@ -922,6 +927,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     payload = JSON.parse(raw)
   } catch {
     payload = null
+  }
+
+  if (!upstream.ok) {
+    return jsonResponse({ error: INTERNAL_SERVER_ERROR_MESSAGE }, 502, corsHeaders)
   }
 
   if (!isFreeGuestMode && authContext && payload && shouldConsumeTicket(payload)) {
