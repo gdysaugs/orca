@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isAuthConfigured, supabase } from '../lib/supabaseClient'
 import { PURCHASE_PLANS } from '../lib/purchasePlans'
@@ -39,6 +39,8 @@ export function Purchase() {
   const [session, setSession] = useState<Session | null>(null)
   const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [authMessage, setAuthMessage] = useState('')
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  const isSigningOutRef = useRef(false)
   const [ticketCount, setTicketCount] = useState<number | null>(null)
   const [ticketStatus, setTicketStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [ticketMessage, setTicketMessage] = useState('')
@@ -208,14 +210,26 @@ export function Purchase() {
   }
 
   const handleSignOut = async () => {
-    if (!supabase) return
+    if (!supabase || isSigningOutRef.current) return
+    isSigningOutRef.current = true
+    setIsSigningOut(true)
+    setAuthStatus('loading')
+    setAuthMessage('')
     try {
       await supabase.auth.signOut({ scope: 'local' })
-      window.location.assign('/')
+      setSession(null)
+      window.location.replace('/')
     } catch (error) {
+      isSigningOutRef.current = false
+      setIsSigningOut(false)
       setAuthStatus('error')
       setAuthMessage(error instanceof Error ? error.message : 'ログアウトに失敗しました。')
     }
+  }
+
+  const handleSignOutTouch = (event: TouchEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    void handleSignOut()
   }
 
   const handleCheckout = async (priceId: string) => {
@@ -453,8 +467,14 @@ export function Purchase() {
             <p className="token-inline-message token-inline-message--error token-account-bottom__error">{ticketMessage}</p>
           )}
           {session && (
-            <button type="button" className="token-button token-button--ghost token-account-bottom__logout" onClick={handleSignOut}>
-              ログアウト
+            <button
+              type="button"
+              className="token-button token-button--ghost token-account-bottom__logout"
+              onClick={handleSignOut}
+              onTouchEnd={handleSignOutTouch}
+              disabled={isSigningOut}
+            >
+              {isSigningOut ? 'ログアウト中...' : 'ログアウト'}
             </button>
           )}
         </section>

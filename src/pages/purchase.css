@@ -543,6 +543,8 @@
   padding: 11px 13px;
   display: grid;
   gap: 8px;
+  position: relative;
+  z-index: 2;
   background:
     linear-gradient(160deg, rgba(95, 124, 255, 0.12), rgba(95, 124, 255, 0) 48%),
     rgba(9, 16, 36, 0.9);
@@ -577,6 +579,12 @@
 .token-account-bottom__logout {
   width: 100%;
   margin-top: 4px;
+  min-height: 44px;
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 @media (max-width: 1080px) {
@@ -595,6 +603,10 @@
   .token-account-bottom {
     border-radius: 14px;
     padding: 14px;
+  }
+
+  .token-account-bottom {
+    margin-bottom: max(12px, env(safe-area-inset-bottom));
   }
 
   .token-card__head {
