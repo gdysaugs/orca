@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 export function TopNav() {
   const [session, setSession] = useState<Session | null>(null)
   const [isAuthReady, setIsAuthReady] = useState(!supabase)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const location = useLocation()
 
   useEffect(() => {
     if (!supabase) {
@@ -60,6 +62,12 @@ export function TopNav() {
   const isLoggedIn = Boolean(session)
   const homePath = '/'
 
+  useEffect(() => {
+    setIsMenuOpen(false)
+  }, [location.pathname])
+
+  const closeMenu = () => setIsMenuOpen(false)
+
   return (
     <header className={`top-nav${isAuthReady && !isLoggedIn ? ' top-nav--guest' : ''}`}>
       <div className='top-nav__brand'>
@@ -68,14 +76,32 @@ export function TopNav() {
           AkumaAI
         </NavLink>
       </div>
-      <div className='top-nav__links'>
-        <a className='top-nav__link' href='https://satanai.org/' target='_blank' rel='noopener noreferrer'>
+      <button
+        className='top-nav__menu-button'
+        type='button'
+        aria-label='メニュー'
+        aria-expanded={isMenuOpen}
+        aria-controls='top-nav-menu'
+        onClick={() => setIsMenuOpen((value) => !value)}
+      >
+        <span />
+        <span />
+        <span />
+      </button>
+      <div id='top-nav-menu' className={`top-nav__links${isMenuOpen ? ' is-open' : ''}`}>
+        <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/' end onClick={closeMenu}>
+          動画生成
+        </NavLink>
+        <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/image-generate' onClick={closeMenu}>
+          画像生成
+        </NavLink>
+        <a className='top-nav__link' href='https://satanai.org/' target='_blank' rel='noopener noreferrer' onClick={closeMenu}>
           SatanAI
         </a>
-        <a className='top-nav__link' href='https://devilai.win/' target='_blank' rel='noopener noreferrer'>
+        <a className='top-nav__link' href='https://devilai.win/' target='_blank' rel='noopener noreferrer' onClick={closeMenu}>
           DevilAI
         </a>
-        <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/purchase'>
+        <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/purchase' onClick={closeMenu}>
           ショップ
         </NavLink>
       </div>

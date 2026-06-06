@@ -7,6 +7,7 @@ import { Purchase } from './pages/Purchase'
 import { Terms } from './pages/Terms'
 import { Tokushoho } from './pages/Tokushoho'
 import { Video } from './pages/Video'
+import { ImageGenerate } from './pages/ImageGenerate'
 
 function PurchaseRouteGate() {
   const [session, setSession] = useState<Session | null>(null)
@@ -55,6 +56,7 @@ export function App() {
       <Route path='/mmaudio' element={<Navigate to='/' replace />} />
       <Route path='/sfx' element={<Navigate to='/' replace />} />
       <Route path='/image' element={<Navigate to='/' replace />} />
+      <Route path='/image-generate' element={<ImageGenerate />} />
       <Route path='/purchase' element={<PurchaseRouteGate />} />
       <Route path='/account' element={<Account />} />
       <Route path='/terms' element={<Terms />} />
