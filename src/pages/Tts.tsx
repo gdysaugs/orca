@@ -85,6 +85,11 @@ const isFailureStatus = (status: string) => {
   return normalized.includes('fail') || normalized.includes('error') || normalized.includes('cancel') || normalized.includes('timeout')
 }
 
+const isRetryableStatusCheck = (status: number) => {
+  if (status === 0 || status === 401 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
+  return status >= 500
+}
+
 const extractJobId = (payload: any) => payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id
 
 const normalizeAudioUrl = (audio: { data: string; mime: string; isDataUrl?: boolean }) => {
@@ -105,15 +110,35 @@ export function Tts() {
   const downloadName = useMemo(() => `speech-${Date.now()}.wav`, [outputAudioUrl])
 
   const pollJob = useCallback(async (jobId: string, runId: number) => {
+    let statusCheckFailures = 0
     for (let i = 0; i < 180; i += 1) {
       if (runIdRef.current !== runId) return null
 
-      const res = await fetchWithAuth(`/api/irodori?id=${encodeURIComponent(jobId)}`)
-      const data = await res.json().catch(() => ({}))
+      let res: Response
+      let data: any = {}
+      try {
+        res = await fetchWithAuth(`/api/irodori?id=${encodeURIComponent(jobId)}`)
+        data = await res.json().catch(() => ({}))
+      } catch {
+        statusCheckFailures += 1
+        if (statusCheckFailures < 30) {
+          setStatusMessage('ステータス確認を再試行中です…')
+          await wait(2000 + i * 50)
+          continue
+        }
+        throw new Error('ステータス確認に失敗しました。')
+      }
 
       if (!res.ok) {
+        if (isRetryableStatusCheck(res.status) && statusCheckFailures < 30) {
+          statusCheckFailures += 1
+          setStatusMessage('ステータス確認を再試行中です…')
+          await wait(2000 + i * 50)
+          continue
+        }
         throw new Error(extractError(data) || 'ステータス確認に失敗しました。')
       }
+      statusCheckFailures = 0
 
       const maybeAudio = extractAudio(data)
       if (maybeAudio) {

@@ -318,7 +318,7 @@ const isFailureStatus = (status: string) => {
 }
 
 const isRetryableStatusCheck = (status: number) => {
-  if (status === 0 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
+  if (status === 0 || status === 401 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
   return status >= 500
 }
 
@@ -925,7 +925,7 @@ export function Video() {
           setStatusMessage('ポイントが不足しています。')
           throw new Error('TICKET_SHORTAGE')
         }
-        if ((pollRes.status === 401 || isRetryableStatusCheck(pollRes.status)) && statusCheckFailures < 30) {
+        if (isRetryableStatusCheck(pollRes.status) && statusCheckFailures < 30) {
           statusCheckFailures += 1
           setStatusMessage('効果音の状態確認を再試行中です…')
           await wait(2500 + i * 50)

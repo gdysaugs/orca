@@ -1,6 +1,9 @@
 import { supabase } from './supabaseClient'
 
 const REFRESH_WINDOW_MS = 60_000
+const TOKEN_RETRY_DELAY_MS = 350
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const refreshAccessToken = async () => {
   if (!supabase) return ''
@@ -43,12 +46,30 @@ const withAuthHeader = async (headersInit?: HeadersInit, forceRefresh = false) =
   return headers
 }
 
+const withRetriedAuthHeader = async (headersInit?: HeadersInit) => {
+  let headers = await withAuthHeader(headersInit, true)
+  if (headers.has('Authorization')) return headers
+
+  await wait(TOKEN_RETRY_DELAY_MS)
+  headers = await withAuthHeader(headersInit, true)
+  return headers
+}
+
+const unauthenticatedResponse = () =>
+  new Response(JSON.stringify({ error: 'ログインが必要です。' }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
 export const fetchWithAuth = async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const firstHeaders = await withAuthHeader(init.headers)
   if (!firstHeaders.has('Authorization')) {
-    return new Response(JSON.stringify({ error: 'ログインが必要です。' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
+    const retryHeaders = await withRetriedAuthHeader(init.headers)
+    if (!retryHeaders.has('Authorization')) return unauthenticatedResponse()
+
+    return fetch(input, {
+      ...init,
+      headers: retryHeaders,
     })
   }
 
@@ -61,13 +82,24 @@ export const fetchWithAuth = async (input: RequestInfo | URL, init: RequestInit 
     return first
   }
 
-  const retryHeaders = await withAuthHeader(init.headers, true)
+  const retryHeaders = await withRetriedAuthHeader(init.headers)
   if (!retryHeaders.has('Authorization')) {
     return first
   }
 
-  return fetch(input, {
+  const retry = await fetch(input, {
     ...init,
     headers: retryHeaders,
+  })
+
+  if (retry.status !== 401) return retry
+
+  await wait(TOKEN_RETRY_DELAY_MS)
+  const finalHeaders = await withRetriedAuthHeader(init.headers)
+  if (!finalHeaders.has('Authorization')) return retry
+
+  return fetch(input, {
+    ...init,
+    headers: finalHeaders,
   })
 }

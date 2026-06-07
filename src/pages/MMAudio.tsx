@@ -65,6 +65,11 @@ const isFailureStatus = (status: string) => {
   )
 }
 
+const isRetryableStatusCheck = (status: number) => {
+  if (status === 0 || status === 401 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
+  return status >= 500
+}
+
 const extractJobId = (payload: any) => payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id
 
 const extractVideo = (payload: any) => {
@@ -205,15 +210,35 @@ export function MMAudio() {
       }
 
       setStatusMessage(JP_STATUS_PROGRESS)
+      let statusCheckFailures = 0
       for (let i = 0; i < 180; i += 1) {
         if (runIdRef.current !== runId) return
 
-        const pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}`)
-        const pollData = await pollRes.json().catch(() => ({}))
+        let pollRes: Response
+        let pollData: any = {}
+        try {
+          pollRes = await fetchWithAuth(`/api/mmaudio?id=${encodeURIComponent(String(jobId))}`)
+          pollData = await pollRes.json().catch(() => ({}))
+        } catch {
+          statusCheckFailures += 1
+          if (statusCheckFailures < 30) {
+            setStatusMessage('ステータス確認を再試行中です…')
+            await wait(2500 + i * 50)
+            continue
+          }
+          throw new Error(JP_STATUS_CHECK_FAIL)
+        }
 
         if (!pollRes.ok) {
+          if (isRetryableStatusCheck(pollRes.status) && statusCheckFailures < 30) {
+            statusCheckFailures += 1
+            setStatusMessage('ステータス確認を再試行中です…')
+            await wait(2500 + i * 50)
+            continue
+          }
           throw new Error(extractError(pollData) || JP_STATUS_CHECK_FAIL)
         }
+        statusCheckFailures = 0
 
         const maybeVideo = extractVideo(pollData)
         if (maybeVideo) {

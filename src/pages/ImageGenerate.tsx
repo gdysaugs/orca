@@ -106,7 +106,7 @@ const isFailureStatus = (status: string) => {
 }
 
 const isRetryableStatusCheck = (status: number) => {
-  if (status === 0 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
+  if (status === 0 || status === 401 || status === 404 || status === 408 || status === 409 || status === 425 || status === 429) return true
   return status >= 500
 }
 
@@ -370,6 +370,9 @@ export function ImageGenerate() {
         return
       }
 
+      if (!submitted.jobId || !submitted.usageId) {
+        throw new Error('ジョブIDを取得できませんでした。')
+      }
       const image = await pollJob(submitted.jobId, submitted.usageId, runId)
       if (!image || runIdRef.current !== runId) return
       setResultImage(image)
