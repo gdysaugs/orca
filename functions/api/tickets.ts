@@ -1,4 +1,5 @@
 ﻿import { createClient, type User } from '@supabase/supabase-js'
+import { getSupabaseUserWithRetry } from '../_shared/auth-retry'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 
 type Env = {
@@ -133,7 +134,7 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
   if (!admin) {
     return { response: jsonResponse({ error: ERROR_SUPABASE_NOT_SET }, 500, corsHeaders) }
   }
-  const { data, error } = await admin.auth.getUser(token)
+  const { data, error } = await getSupabaseUserWithRetry(admin, token)
   if (error || !data?.user) {
     return { response: jsonResponse({ error: ERROR_AUTH_FAILED }, 401, corsHeaders) }
   }
@@ -175,4 +176,3 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   return jsonResponse({ tickets: data?.tickets ?? 0, hasRecord: Boolean(data) }, 200, corsHeaders)
 }
-

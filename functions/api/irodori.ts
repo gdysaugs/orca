@@ -1,4 +1,5 @@
 ﻿import { createClient, type User } from '@supabase/supabase-js'
+import { getSupabaseUserWithRetry } from '../_shared/auth-retry'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 
 type Env = {
@@ -138,7 +139,7 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
     }
   }
 
-  const { data, error } = await admin.auth.getUser(token)
+  const { data, error } = await getSupabaseUserWithRetry(admin, token)
   if (error || !data?.user) {
     return { response: jsonResponse({ error: '認証に失敗しました。' }, 401, corsHeaders) }
   }

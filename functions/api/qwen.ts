@@ -1,6 +1,7 @@
 ﻿import workflowTemplate from './qwen-workflow.json'
 import nodeMapTemplate from './qwen-node-map.json'
 import { createClient, type User } from '@supabase/supabase-js'
+import { getSupabaseUserWithRetry } from '../_shared/auth-retry'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 import { isUnderageImage } from '../_shared/rekognition'
 
@@ -217,7 +218,7 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
   if (!admin) {
     return { response: jsonResponse({ error: ERROR_SUPABASE_NOT_SET }, 500, corsHeaders) }
   }
-  const { data, error } = await admin.auth.getUser(token)
+  const { data, error } = await getSupabaseUserWithRetry(admin, token)
   if (error || !data?.user) {
     return { response: jsonResponse({ error: ERROR_AUTH_FAILED }, 401, corsHeaders) }
   }
@@ -1176,5 +1177,4 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     )
   }
 }
-
 

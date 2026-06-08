@@ -8,6 +8,7 @@ import workflowSmoothmixI2VTemplate from './wan-smoothmix-workflow-i2v.json'
 import nodeMapRapidI2VTemplate from './wan-rapid-node-map-i2v.json'
 import nodeMapSmoothmixI2VTemplate from './wan-smoothmix-node-map-i2v.json'
 import { createClient, type User } from '@supabase/supabase-js'
+import { getSupabaseUserWithRetry } from '../_shared/auth-retry'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 import { isUnderageImage } from '../_shared/rekognition'
 
@@ -187,7 +188,7 @@ const requireAuthenticatedUser = async (request: Request, env: Env, corsHeaders:
       ),
     }
   }
-  const { data, error } = await admin.auth.getUser(token)
+  const { data, error } = await getSupabaseUserWithRetry(admin, token)
   if (error || !data?.user) {
     return { response: jsonResponse({ error: '認証に失敗しました。' }, 401, corsHeaders) }
   }
