@@ -98,6 +98,9 @@ export function TopNav() {
         <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/prompt-helper' onClick={closeMenu}>
           プロンプト
         </NavLink>
+        <NavLink className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`} to='/chatbot' onClick={closeMenu}>
+          チャット
+        </NavLink>
         <a className='top-nav__link' href='https://satanai.org/' target='_blank' rel='noopener noreferrer' onClick={closeMenu}>
           SatanAI
         </a>

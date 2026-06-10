@@ -9,6 +9,7 @@ import { Tokushoho } from './pages/Tokushoho'
 import { Video } from './pages/Video'
 import { ImageGenerate } from './pages/ImageGenerate'
 import { PromptHelper } from './pages/PromptHelper'
+import { Chatbot } from './pages/Chatbot'
 
 function PurchaseRouteGate() {
   const [session, setSession] = useState<Session | null>(null)
@@ -59,6 +60,7 @@ export function App() {
       <Route path='/image' element={<Navigate to='/' replace />} />
       <Route path='/image-generate' element={<ImageGenerate />} />
       <Route path='/prompt-helper' element={<PromptHelper />} />
+      <Route path='/chatbot' element={<Chatbot />} />
       <Route path='/purchase' element={<PurchaseRouteGate />} />
       <Route path='/account' element={<Account />} />
       <Route path='/terms' element={<Terms />} />
