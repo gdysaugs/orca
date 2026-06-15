@@ -5,3 +5,18 @@
   X-Content-Type-Options: nosniff
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 
+/favicon.ico
+  Cache-Control: no-store
+
+/favicon.png
+  Cache-Control: no-store
+
+/favicon-192.png
+  Cache-Control: no-store
+
+/favicon-512.png
+  Cache-Control: no-store
+
+/apple-touch-icon.png
+  Cache-Control: no-store
+

@@ -3,15 +3,16 @@ import type { Session } from '@supabase/supabase-js'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { Account } from './pages/Account'
-import { Purchase } from './pages/Purchase'
-import { Terms } from './pages/Terms'
-import { Tokushoho } from './pages/Tokushoho'
+import { Home } from './pages/Home'
+import { ImageEdit } from './pages/ImageEdit'
 import { Video } from './pages/Video'
-import { ImageGenerate } from './pages/ImageGenerate'
-import { PromptHelper } from './pages/PromptHelper'
-import { Chatbot } from './pages/Chatbot'
 
-function PurchaseRouteGate() {
+function AuthRoute({ session, children }: { session: Session | null; children: JSX.Element }) {
+  if (!session) return <Navigate to='/' replace />
+  return children
+}
+
+export function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(!supabase)
 
@@ -21,50 +22,60 @@ function PurchaseRouteGate() {
       return
     }
 
-    supabase.auth.getSession().then(({ data }) => {
+    const supabaseClient = supabase
+    let isCancelled = false
+
+    const applyHashSession = async () => {
+      if (typeof window === 'undefined') return
+      const rawHash = window.location.hash
+      if (!rawHash || !rawHash.includes('access_token=')) return
+
+      const hashParams = new URLSearchParams(rawHash.startsWith('#') ? rawHash.slice(1) : rawHash)
+      const accessToken = hashParams.get('access_token')
+      const refreshToken = hashParams.get('refresh_token')
+      if (!accessToken || !refreshToken) return
+
+      const { data, error } = await supabaseClient.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      })
+      if (error || isCancelled) return
+
+      setSession(data.session ?? null)
+      const url = new URL(window.location.href)
+      url.hash = ''
+      window.history.replaceState({}, document.title, url.toString())
+    }
+
+    void applyHashSession()
+
+    supabaseClient.auth.getSession().then(({ data }) => {
+      if (isCancelled) return
       setSession(data.session ?? null)
       setAuthReady(true)
     })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
       setAuthReady(true)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      isCancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
 
   if (!authReady) return null
-  if (!session) return <Navigate to='/' replace />
-  return <Purchase />
-}
 
-export function App() {
   return (
     <Routes>
-      <Route path='/' element={<Video />} />
+      <Route path='/' element={session ? <Video /> : <Home />} />
       <Route path='/video' element={<Navigate to='/' replace />} />
-      <Route path='/video-rapid' element={<Navigate to='/' replace />} />
-      <Route path='/video-remix' element={<Navigate to='/' replace />} />
-      <Route path='/fastmove' element={<Navigate to='/' replace />} />
-      <Route path='/smoothmix' element={<Navigate to='/' replace />} />
-      <Route path='/video-lora' element={<Navigate to='/' replace />} />
-      <Route path='/t2v' element={<Navigate to='/' replace />} />
-      <Route path='/tts' element={<Navigate to='/' replace />} />
-      <Route path='/lipsync' element={<Navigate to='/' replace />} />
-      <Route path='/voice' element={<Navigate to='/' replace />} />
-      <Route path='/mmaudio' element={<Navigate to='/' replace />} />
-      <Route path='/sfx' element={<Navigate to='/' replace />} />
-      <Route path='/image' element={<Navigate to='/' replace />} />
-      <Route path='/image-generate' element={<ImageGenerate />} />
-      <Route path='/prompt-helper' element={<PromptHelper />} />
-      <Route path='/chatbot' element={<Chatbot />} />
-      <Route path='/purchase' element={<PurchaseRouteGate />} />
-      <Route path='/account' element={<Account />} />
-      <Route path='/terms' element={<Terms />} />
-      <Route path='/tokushoho' element={<Tokushoho />} />
+      <Route path='/image-edit' element={<AuthRoute session={session}><ImageEdit /></AuthRoute>} />
+      <Route path='/account' element={<AuthRoute session={session}><Account /></AuthRoute>} />
       <Route path='*' element={<Navigate to='/' replace />} />
     </Routes>
   )

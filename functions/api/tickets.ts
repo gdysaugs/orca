@@ -1,6 +1,7 @@
 ﻿import { createClient, type User } from '@supabase/supabase-js'
 import { getSupabaseUserWithRetry } from '../_shared/auth-retry'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
+import { hasActivePremiumMembership } from '../_shared/premium'
 
 type Env = {
   SUPABASE_URL?: string
@@ -174,5 +175,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: INTERNAL_SERVER_ERROR_MESSAGE }, 500, corsHeaders)
   }
 
-  return jsonResponse({ tickets: data?.tickets ?? 0, hasRecord: Boolean(data) }, 200, corsHeaders)
+  const premiumMember = await hasActivePremiumMembership(auth.admin, auth.user)
+
+  return jsonResponse(
+    { tickets: data?.tickets ?? 0, hasRecord: Boolean(data), premium_member: premiumMember },
+    200,
+    corsHeaders,
+  )
 }

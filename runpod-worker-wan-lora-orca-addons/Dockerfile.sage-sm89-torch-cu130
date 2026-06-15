@@ -1,0 +1,53 @@
+FROM suarez123/wan22-i2v:wan22-lora-pack-orca-addons-20260614
+
+ENV SAGEATTENTION_SM89_WHEEL_URL="https://huggingface.co/UmeAiRT/ComfyUI-Auto-Installer-Assets/resolve/main/whl/sm89/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl"
+ENV SAGEATTENTION_SM89_WHEEL_SHA256="1b7312158c9b179a6235798c43303d9a01b6ccecdc442c019f7fe26bd7f00213"
+ENV COMFYUI_EXTRA_ARGS="--use-sage-attention"
+ENV CC="/usr/bin/gcc"
+ENV CXX="/usr/bin/g++"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      cuda-cudart-13-0 \
+      python3.12-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir --upgrade --force-reinstall \
+      --index-url https://download.pytorch.org/whl/cu130 \
+      --extra-index-url https://pypi.org/simple \
+      torch==2.10.0+cu130 \
+      torchvision==0.25.0+cu130 \
+      torchaudio==2.10.0+cu130
+
+RUN python -m pip uninstall -y sageattention || true && \
+    python -m pip install --no-cache-dir "${SAGEATTENTION_SM89_WHEEL_URL}#sha256=${SAGEATTENTION_SM89_WHEEL_SHA256}" && \
+    python - <<'PY'
+import torch
+import triton
+import torchvision
+import torchaudio
+from sageattention import sageattn
+
+print("torch", torch.__version__, "cuda", torch.version.cuda)
+print("triton", triton.__version__)
+print("torchvision", torchvision.__version__)
+print("torchaudio", torchaudio.__version__)
+print("sageattention sm89 wheel import OK", sageattn)
+PY
+
+RUN python - <<'PY'
+from pathlib import Path
+
+path = Path("/start.sh")
+text = path.read_text()
+old = "python -u /comfyui/main.py --disable-auto-launch --disable-metadata --log-stdout &"
+new = "python -u /comfyui/main.py --disable-auto-launch --disable-metadata --log-stdout ${COMFYUI_EXTRA_ARGS:-} &"
+
+if new in text:
+    raise SystemExit("start.sh already contains COMFYUI_EXTRA_ARGS")
+if old not in text:
+    raise SystemExit("ComfyUI start command not found in /start.sh")
+
+path.write_text(text.replace(old, new))
+PY

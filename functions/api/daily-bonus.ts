@@ -5,12 +5,15 @@ import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 type Env = {
   SUPABASE_URL?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
+  SUPABASE_ANON_KEY?: string
+  VITE_SUPABASE_URL?: string
+  VITE_SUPABASE_ANON_KEY?: string
 }
 
 const corsMethods = 'POST, GET, OPTIONS'
-const BONUS_COOLDOWN_HOURS = 24
+const BONUS_COOLDOWN_HOURS = 12
 const BONUS_COOLDOWN_MS = BONUS_COOLDOWN_HOURS * 60 * 60 * 1000
-const BONUS_AMOUNT = 3
+const BONUS_AMOUNT = 1
 const DAILY_BONUS_REASONS = ['daily_bonus', 'daily_bonus_claim']
 
 const INTERNAL_SERVER_ERROR_MESSAGE = '\u30b5\u30fc\u30d0\u30fc\u5185\u90e8\u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f\u3002\u6642\u9593\u3092\u304a\u3044\u3066\u518d\u5ea6\u304a\u8a66\u3057\u304f\u3060\u3055\u3044\u3002'
@@ -18,7 +21,7 @@ const ERROR_LOGIN_REQUIRED = '\u30ed\u30b0\u30a4\u30f3\u304c\u5fc5\u8981\u3067\u
 const ERROR_AUTH_FAILED = '\u8a8d\u8a3c\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002'
 const ERROR_GOOGLE_ONLY = 'Google\u30ed\u30b0\u30a4\u30f3\u306e\u307f\u5bfe\u5fdc\u3057\u3066\u3044\u307e\u3059\u3002'
 const ERROR_SUPABASE_NOT_SET =
-  'SUPABASE_URL \u307e\u305f\u306f SUPABASE_SERVICE_ROLE_KEY \u304c\u8a2d\u5b9a\u3055\u308c\u3066\u3044\u307e\u305b\u3093\u3002'
+  'Supabase\u74b0\u5883\u5909\u6570\u304c\u8a2d\u5b9a\u3055\u308c\u3066\u3044\u307e\u305b\u3093\u3002'
 
 const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -33,11 +36,25 @@ const extractBearerToken = (request: Request) => {
 }
 
 const getSupabaseAdmin = (env: Env) => {
-  const url = env.SUPABASE_URL
+  const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL
   const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !serviceKey) return null
   return createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+  })
+}
+
+const getSupabaseUserClient = (env: Env, accessToken: string) => {
+  const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL
+  const anonKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY
+  if (!url || !anonKey || !accessToken) return null
+  return createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
   })
 }
 
@@ -65,7 +82,7 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
   if (!isGoogleUser(data.user)) {
     return { response: jsonResponse({ error: ERROR_GOOGLE_ONLY }, 403, corsHeaders) }
   }
-  return { admin, user: data.user }
+  return { admin, user: data.user, token }
 }
 
 const fetchLatestClaimAt = async (
@@ -157,11 +174,6 @@ const getDailyBonusStatus = async (
   return { error: null, status: buildBonusStatus(latest.createdAt, userCreatedAt) }
 }
 
-const buildDailyBonusUsageId = (userId: string) => {
-  const slot = Math.floor(Date.now() / BONUS_COOLDOWN_MS)
-  return `daily_bonus:${userId}:${slot}`
-}
-
 export const onRequestOptions: PagesFunction<Env> = async ({ request, env }) => {
   const corsHeaders = buildCorsHeaders(request, env, corsMethods)
   if (isCorsBlocked(request, env)) {
@@ -210,56 +222,29 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return auth.response
   }
 
-  const statusResult = await getDailyBonusStatus(auth.admin, auth.user)
-  if (statusResult.error || !statusResult.status) {
-    return jsonResponse({ error: INTERNAL_SERVER_ERROR_MESSAGE }, 500, corsHeaders)
+  const userClient = getSupabaseUserClient(env, auth.token)
+  if (!userClient) {
+    return jsonResponse({ error: ERROR_SUPABASE_NOT_SET }, 500, corsHeaders)
   }
 
-  if (!statusResult.status.canClaim) {
-    return jsonResponse(
-      {
-        granted: false,
-        can_claim: false,
-        next_eligible_at: statusResult.status.nextEligibleAt,
-        remaining_seconds: statusResult.status.remainingSeconds,
-        reason: 'cooldown',
-        cooldown_hours: BONUS_COOLDOWN_HOURS,
-        amount: BONUS_AMOUNT,
-      },
-      200,
-      corsHeaders,
-    )
-  }
-
-  const email = auth.user.email ?? ''
-  const usageId = buildDailyBonusUsageId(auth.user.id)
-  const { data, error } = await auth.admin.rpc('grant_tickets', {
-    p_usage_id: usageId,
-    p_user_id: auth.user.id,
-    p_email: email,
-    p_amount: BONUS_AMOUNT,
-    p_reason: 'daily_bonus',
-    p_metadata: {
-      source: 'daily_bonus',
-      cooldown_hours: BONUS_COOLDOWN_HOURS,
-    },
-  })
+  const { data, error } = await userClient.rpc('claim_daily_bonus')
 
   if (error) {
     return jsonResponse({ error: INTERNAL_SERVER_ERROR_MESSAGE }, 500, corsHeaders)
   }
 
   const result = Array.isArray(data) ? data[0] : data
-  const alreadyProcessed = Boolean(result?.already_processed)
+  const granted = Boolean(result?.claimed)
   const ticketsLeftRaw = Number(result?.tickets_left)
-  const nextEligibleAt = new Date(Date.now() + BONUS_COOLDOWN_MS).toISOString()
+  const remainingSecondsRaw = Number(result?.seconds_remaining)
+  const nextEligibleAt = result?.next_claim_at ? String(result.next_claim_at) : null
   return jsonResponse(
     {
-      granted: !alreadyProcessed,
+      granted,
       can_claim: false,
       next_eligible_at: nextEligibleAt,
-      remaining_seconds: Math.ceil(BONUS_COOLDOWN_MS / 1000),
-      reason: alreadyProcessed ? 'cooldown' : 'granted',
+      remaining_seconds: Number.isFinite(remainingSecondsRaw) ? remainingSecondsRaw : 0,
+      reason: granted ? 'granted' : 'cooldown',
       cooldown_hours: BONUS_COOLDOWN_HOURS,
       amount: BONUS_AMOUNT,
       tickets_left: Number.isFinite(ticketsLeftRaw) ? ticketsLeftRaw : null,

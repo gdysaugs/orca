@@ -1,180 +1,234 @@
-import { useState } from 'react'
-import { TopNav } from '../components/TopNav'
-import './camera.css'
+import { useCallback, useEffect, useRef } from 'react'
+import { supabase } from '../lib/supabaseClient'
 import './home.css'
 
-const LP_REFERENCE_IMAGE = '/media/lp/akuma-lp-reference.avif'
-const LP_DEMO_VIDEO = '/media/lp/akuma-lp-demo.mp4'
-const LP_VOICE_SAMPLE = '/media/lp/caption_sample6.wav'
-const LP_SFX_SAMPLE_VIDEO = '/media/lp/moviegenaudio-example-1-exact-20260402.mp4'
+const HERO_VIDEO_SRC = '/lp/hero-banner.webm?v=loop3'
 
-const VOICE_EMOJI_GROUPS = [
-  {
-    title: '音声演出',
-    items: [
-      ['👂', '囁き、耳元の音'],
-      ['😮‍💨', '吐息、溜息、寝息'],
-      ['⏸️', '間、沈黙'],
-      ['🤭', '笑い（くすくす、含み笑いなど）'],
-      ['🥵', '喘ぎ、うめき声、唸り声'],
-      ['📢', 'エコー、リバーブ'],
-      ['🌬️', '息切れ、荒い息遣い、呼吸音'],
-      ['😮', '息をのむ'],
-      ['👅', '舐める音、咀嚼音、水音'],
-      ['💋', 'リップノイズ'],
-      ['📞', '電話越し、スピーカー越しのような音'],
-      ['🥤', '唾を飲み込む音'],
-      ['🤧', '咳き込み、鼻をすする、くしゃみ、咳払い'],
-      ['😒', '舌打ち'],
-      ['👌', '相槌、頷く音'],
-      ['🎵', '鼻歌'],
-      ['🤐', '口を塞がれて'],
-    ],
-  },
-  {
-    title: '感情表現',
-    items: [
-      ['🫶', '優しく'],
-      ['😭', '嗚咽、泣き声、悲しみ'],
-      ['😱', '悲鳴、叫び、絶叫'],
-      ['😆', '喜びながら'],
-      ['😠', '怒り、不満げに、拗ねながら'],
-      ['😲', '驚き、感嘆'],
-      ['😖', '苦しげに'],
-      ['😟', '心配そうに'],
-      ['🫣', '恥ずかしそうに、照れながら'],
-      ['🙄', '呆れたように'],
-      ['😊', '楽しげに、嬉しそうに'],
-      ['🙏', '懇願するように'],
-      ['😌', '安堵、満足げに'],
-      ['🤔', '疑問の声'],
-    ],
-  },
-  {
-    title: '話し方',
-    items: [
-      ['😏', 'からかうように'],
-      ['🥺', '声を震わせながら、自信のなさげに'],
-      ['😪', '眠そうに、気だるげに'],
-      ['😰', '慌てて、動揺、緊張、どもり'],
-      ['🥴', '酔っ払って'],
-      ['🥱', 'あくび'],
-    ],
-  },
-  {
-    title: '速度・リズム',
-    items: [
-      ['⏩', '早口、一気にまくしたてる、急いで'],
-      ['🐢', 'ゆっくりと'],
-    ],
-  },
-] as const
+const loraLabels = [
+  '片足上げ',
+  '首掴み跪き',
+  '硝子接吻',
+  '俯せ後背位',
+  '画面水飛沫',
+  '顔面衝撃',
+  '濃厚接吻',
+  '抱上げ後背位',
+  '手口連携',
+  '一人称乳交',
+  '射精演出 1',
+  '射精演出 2',
+  '射精演出 3',
+  '射精演出 4',
+  '一人称正常位',
+  '小便',
+  '瞬間切替乳交 1',
+  '瞬間切替乳交 2',
+  '瞬間切替背面後背位 1',
+  '瞬間切替背面後背位 2',
+  '瞬間切替顔射 1',
+  '瞬間切替顔射 2',
+  '瞬間切替正面後背位 1',
+  '瞬間切替正面後背位 2',
+  '瞬間切替正面後背位 3',
+  '瞬間切替手交 1',
+  '瞬間切替手交 2',
+  '瞬間切替手交 3',
+  '瞬間切替口交',
+  '瞬間切替正常位 1',
+  '瞬間切替正常位 2',
+  '瞬間切替正常位 3',
+  '瞬間切替屈み女上位 1',
+  '瞬間切替屈み女上位 2',
+  '側位姿勢',
+]
 
 export function Home() {
-  const [demoVideoKey, setDemoVideoKey] = useState(0)
+  const heroVideoRef = useRef<HTMLVideoElement | null>(null)
+
+  const handleGoogleSignIn = useCallback(async () => {
+    if (!supabase) return
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      },
+    })
+  }, [])
+
+  const replayHeroVideo = useCallback(() => {
+    const video = heroVideoRef.current
+    if (!video) return
+    try {
+      video.currentTime = 0
+    } catch {
+      video.load()
+    }
+    void video.play().catch(() => undefined)
+  }, [])
+
+  const loopHeroVideoIfNeeded = useCallback(() => {
+    const video = heroVideoRef.current
+    if (!video) return
+    const duration = video.duration
+    if (!Number.isFinite(duration) || duration <= 0) return
+    if (video.currentTime < Math.max(0, duration - 0.22)) return
+    replayHeroVideo()
+  }, [replayHeroVideo])
+
+  useEffect(() => {
+    const video = heroVideoRef.current
+    if (!video) return
+
+    video.muted = true
+    video.defaultMuted = true
+    video.loop = true
+    video.playsInline = true
+    video.setAttribute('muted', '')
+    video.setAttribute('playsinline', '')
+    video.setAttribute('webkit-playsinline', '')
+
+    const handleEnded = () => replayHeroVideo()
+    const handleTimeUpdate = () => loopHeroVideoIfNeeded()
+    const handlePause = () => {
+      if (video.ended) replayHeroVideo()
+    }
+    const intervalId = window.setInterval(loopHeroVideoIfNeeded, 250)
+
+    video.addEventListener('ended', handleEnded)
+    video.addEventListener('timeupdate', handleTimeUpdate)
+    video.addEventListener('pause', handlePause)
+    void video.play().catch(() => undefined)
+
+    return () => {
+      window.clearInterval(intervalId)
+      video.removeEventListener('ended', handleEnded)
+      video.removeEventListener('timeupdate', handleTimeUpdate)
+      video.removeEventListener('pause', handlePause)
+    }
+  }, [loopHeroVideoIfNeeded, replayHeroVideo])
 
   return (
-    <div className='home-page home-page--lp'>
-      <TopNav />
-      <main className='home-wrap home-wrap--lp'>
-        <section className='home-lp-hero' aria-label='LPヘッダー'>
-          <h1>画像からセリフ効果音付きの動画を作ろう</h1>
-        </section>
+    <main className="lp-page">
+      <header className="lp-header">
+        <a className="lp-brand" href="/" aria-label="OrcaAI">
+          <img src="/orca-header-icon.png" alt="" aria-hidden="true" />
+          <span>OrcaAI</span>
+        </a>
+        <button className="lp-login-button" type="button" onClick={handleGoogleSignIn}>
+          ログイン / 無料登録
+        </button>
+      </header>
 
-        <section className='home-lp-showcase' aria-label='生成サンプル'>
-          <figure className='home-lp-card'>
-            <img src={LP_REFERENCE_IMAGE} alt='参考イメージ' loading='eager' />
-            <figcaption>Input Image</figcaption>
-          </figure>
-          <figure className='home-lp-card'>
-            <video
-              key={demoVideoKey}
-              controls
-              playsInline
-              preload='metadata'
-              poster={LP_REFERENCE_IMAGE}
-              src={LP_DEMO_VIDEO}
-              onEnded={() => setDemoVideoKey((prev) => prev + 1)}
-            />
-            <figcaption>Output Preview</figcaption>
-          </figure>
-        </section>
+      <section className="lp-hero">
+        <video
+          ref={heroVideoRef}
+          className="lp-hero__video"
+          src={HERO_VIDEO_SRC}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          onEnded={replayHeroVideo}
+        />
+        <div className="lp-hero__shade" aria-hidden="true" />
+        <div className="lp-hero__content">
+          <p className="lp-eyebrow">High Quality AI Video Studio</p>
+          <h1>OrcaAI</h1>
+          <p className="lp-lede">
+            顔写真から高画質なAI動画を高速生成。LoRAモーション、sound追加、画像編集、角度変更までひとつの画面で扱えます。
+          </p>
+          <div className="lp-hero__actions">
+            <button className="lp-primary" type="button" onClick={handleGoogleSignIn}>
+              ログイン / 無料登録
+            </button>
+            <span>登録後すぐに無料チケットで試せます</span>
+          </div>
+        </div>
+      </section>
 
-        <div className='home-lp-inline-example' aria-label='入力例'>
-          <article className='home-lp-inline-example__item'>
-            <strong>プロンプト</strong>
-            <span>女性が睨む</span>
-          </article>
-          <article className='home-lp-inline-example__item'>
-            <strong>セリフ</strong>
-            <span>何見てんのよ？💋</span>
-          </article>
-          <article className='home-lp-inline-example__item'>
-            <strong>効果音</strong>
-            <span>wind</span>
-          </article>
+      <section className="lp-band lp-band--stats" aria-label="OrcaAI features">
+        <div className="lp-stat">
+          <strong>高速生成</strong>
+          <span>短時間でプレビューまで到達しやすい生成導線。</span>
+        </div>
+        <div className="lp-stat">
+          <strong>高画質</strong>
+          <span>滑らかな動画表現と鮮明な質感。</span>
+        </div>
+        <div className="lp-stat">
+          <strong>無料登録</strong>
+          <span>登録時に無料チケットを付与。</span>
+        </div>
+        <div className="lp-stat">
+          <strong>12時間ボーナス</strong>
+          <span>ログイン後、12時間ごとにボーナスを受け取り可能。</span>
+        </div>
+      </section>
+
+      <section className="lp-section lp-section--split">
+        <div className="lp-copy">
+          <p className="lp-eyebrow">Motion LoRA</p>
+          <h2>動きだけを選べるLoRAモーション</h2>
+          <p>
+            プロンプトを書かなくても、使いたい動きを選ぶだけで生成できます。複数のLoRAを重ねて、動きや演出の方向性を細かく調整できます。
+          </p>
+        </div>
+        <figure className="lp-media-card">
+          <video src="/lp/lora-leg-example.mp4" autoPlay muted loop playsInline controls />
+          <figcaption>LoRA使用例: 片足上げ</figcaption>
+        </figure>
+      </section>
+
+      <section className="lp-section">
+        <div className="lp-section__header">
+          <p className="lp-eyebrow">LoRA Library</p>
+          <h2>対応LoRA一覧</h2>
+          <p>生成画面で強さをスライダー調整できます。0.1以上で適用、1.0から1.5が目安です。</p>
+        </div>
+        <div className="lp-lora-grid">
+          {loraLabels.map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </div>
+      </section>
+
+      <section className="lp-section lp-section--edit">
+        <div className="lp-section__header">
+          <p className="lp-eyebrow">Image Edit</p>
+          <h2>画像編集と角度変更も同じアカウントで</h2>
+          <p>服装や質感の変更、カメラアングルの変更をプロンプトやプリセットで実行できます。</p>
         </div>
 
-        <section className='home-lp-capabilities' aria-label='AkumaAIでできること'>
-          <h2>AkumaAIでできること</h2>
-          <ul>
-            <li>5秒 / 7秒 / 10秒の動画を生成可能</li>
-            <li>無料登録で3回まで生成を体験可能</li>
-            <li>画像1枚からセリフ付き動画を簡単生成</li>
-            <li>効果音付き動画をワンステップで生成</li>
-            <li>ボイス指示で声質・感情を細かく調整可能</li>
-          </ul>
-        </section>
-
-        <div className='home-lp-voice__cta-wrap'>
-          <a className='home-lp-voice__cta' href='/video?model=v6'>
-            今すぐ無料で試す
-          </a>
+        <div className="lp-showcase-grid">
+          <article className="lp-showcase">
+            <div className="lp-before-after">
+              <img src="/lp/shell-bikini-source.webp" alt="元画像" />
+              <img src="/lp/shell-bikini-edit.png" alt="画像編集結果" />
+            </div>
+            <div>
+              <strong>画像編集</strong>
+              <p>命令: ビキニを貝殻にして</p>
+            </div>
+          </article>
+          <article className="lp-showcase">
+            <img src="/lp/low-angle-edit.png" alt="下からのアングル変更結果" />
+            <div>
+              <strong>角度変更</strong>
+              <p>プリセット: Low Angle。下からのアングルに変更。</p>
+            </div>
+          </article>
         </div>
+      </section>
 
-        <section className='home-lp-voice' aria-label='ボイスデザイン案内'>
-          <h2>テキスト指示だけで、声質と感情を作れる</h2>
-          <p>VoiceDesignは文章と絵文字の指定だけで、声の雰囲気・感情・話し方を調整できます。</p>
-          <p>対応絵文字は全39種類です。</p>
-          <article className='home-lp-voice__sample'>
-            <h3>実際の音声サンプル</h3>
-            <p className='home-lp-voice__sample-label'>セリフ</p>
-            <p className='home-lp-voice__sample-text'>これ😠、昨日からずっと机の上に置きっぱなしになってますよ😒早く片付けておいてくださいね😠</p>
-            <p className='home-lp-voice__sample-label'>ボイス指示</p>
-            <p className='home-lp-voice__sample-text'>低めの女性の声で、嫌悪感を示しながら怒っているように話してほしいです。途中で舌打ちを挟み、強い憎しみを持って見下している感じでお願いします。</p>
-            <audio controls preload='metadata' src={LP_VOICE_SAMPLE} />
-          </article>
-          <div className='home-lp-voice__grid'>
-            {VOICE_EMOJI_GROUPS.map((group) => (
-              <article key={group.title} className='home-lp-voice__card'>
-                <h3>{group.title}</h3>
-                <ul>
-                  {group.items.map(([emoji, meaning]) => (
-                    <li key={group.title + '-' + emoji}>
-                      <span className='home-lp-voice__emoji' aria-hidden='true'>
-                        {emoji}
-                      </span>
-                      <span>{meaning}</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className='home-lp-sfx' aria-label='効果音機能アピール'>
-          <h2>効果音機能</h2>
-          <p>動画の内容を自動で解析し、テキスト指示と合わせて最適な効果音を自動生成して動画に合成。</p>
-          <article className='home-lp-sfx__prompt'>
-            <h3>プロンプト例</h3>
-            <p>氷が鋭いパキッという音を立てて割れ、金属製の道具が氷の表面をこすります。</p>
-          </article>
-          <div className='home-lp-sfx__video'>
-            <video controls playsInline preload='metadata' src={LP_SFX_SAMPLE_VIDEO} />
-          </div>
-        </section>
-      </main>
-    </div>
+      <section className="lp-final">
+        <p className="lp-eyebrow">Start Free</p>
+        <h2>無料登録でOrcaAIを試す</h2>
+        <p>動画生成、LoRA、sound、画像編集をひとつのアカウントで利用できます。</p>
+        <button className="lp-primary" type="button" onClick={handleGoogleSignIn}>
+          ログイン / 無料登録
+        </button>
+      </section>
+    </main>
   )
 }

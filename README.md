@@ -1,8 +1,8 @@
-# akumaai
+# orcaai
 
 AI video app (I2V / Animate) running on **Cloudflare Pages + Pages Functions**.
 
-Official URL: https://akumaai.cc
+Official URL: https://orcaai.uk
 
 ## Architecture
 
@@ -45,7 +45,7 @@ dist
 
 Deploy example:
 ```bash
-npx wrangler pages deploy dist --project-name akumaai --branch main
+npx wrangler pages deploy dist --project-name orcaai --branch main
 ```
 
 ## Required Pages Environment Variables

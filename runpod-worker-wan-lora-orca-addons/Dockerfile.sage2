@@ -1,0 +1,39 @@
+FROM suarez123/wan22-i2v:wan22-lora-pack-orca-addons-20260614
+
+ENV SAGEATTENTION_WHEEL_URL="https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl"
+ENV COMFYUI_EXTRA_ARGS="--use-sage-attention"
+ENV CC="/usr/bin/gcc"
+ENV CXX="/usr/bin/g++"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential python3.12-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir "${SAGEATTENTION_WHEEL_URL}" && \
+    gcc --version && \
+    test -f /usr/include/python3.12/Python.h && \
+    python - <<'PY'
+import torch
+import triton
+from sageattention import sageattn
+
+print("torch", torch.__version__, "cuda", torch.version.cuda)
+print("triton", triton.__version__)
+print("sageattention 2.2 import OK", sageattn)
+PY
+
+RUN python - <<'PY'
+from pathlib import Path
+
+path = Path("/start.sh")
+text = path.read_text()
+old = "python -u /comfyui/main.py --disable-auto-launch --disable-metadata --log-stdout &"
+new = "python -u /comfyui/main.py --disable-auto-launch --disable-metadata --log-stdout ${COMFYUI_EXTRA_ARGS:-} &"
+
+if new in text:
+    raise SystemExit("start.sh already contains COMFYUI_EXTRA_ARGS")
+if old not in text:
+    raise SystemExit("ComfyUI start command not found in /start.sh")
+
+path.write_text(text.replace(old, new))
+PY

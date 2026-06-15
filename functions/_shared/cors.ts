@@ -3,12 +3,10 @@ type CorsEnv = {
 }
 
 const DEFAULT_ALLOWED_ORIGINS = [
-  'https://akumaai.cc',
-  'https://www.akumaai.cc',
-  'https://akuma.cc',
-  'https://www.akuma.cc',
-  'https://akumaai.pages.dev',
-  '*.akumaai.pages.dev',
+  'https://orcaai.uk',
+  'https://www.orcaai.uk',
+  'https://orcaai.pages.dev',
+  '*.orcaai.pages.dev',
 ]
 
 const normalize = (value: string) => value.trim().toLowerCase()

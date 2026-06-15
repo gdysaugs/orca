@@ -1,0 +1,58 @@
+FROM suarez123/wan22-i2v:wan22-lora-pack-orca-addons-20260614
+
+ARG SAGE_ATTENTION_ADA_COMMIT=18904f0a409cd7bb83b516b3819ebf3f1cc8b11b
+
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+ENV CUDA_HOME="/usr/local/cuda-12.8"
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
+ENV TORCH_CUDA_ARCH_LIST="8.9"
+ENV MAX_JOBS="8"
+ENV EXT_PARALLEL="8"
+ENV NVCC_APPEND_FLAGS="--threads 8"
+ENV CC="/usr/bin/gcc"
+ENV CXX="/usr/bin/g++"
+ENV COMFYUI_EXTRA_ARGS="--use-sage-attention"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      cuda-cudart-dev-12-8 \
+      cuda-driver-dev-12-8 \
+      cuda-libraries-dev-12-8 \
+      cuda-nvcc-12-8 \
+      git \
+      ninja-build \
+      python3.12-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN nvcc --version && \
+    python -m pip install --no-cache-dir --no-deps numpy packaging pybind11 setuptools wheel
+
+RUN git clone https://github.com/fblissjr/SageAttention-ada.git /tmp/SageAttention-ada && \
+    cd /tmp/SageAttention-ada && \
+    git checkout --detach "${SAGE_ATTENTION_ADA_COMMIT}"
+
+RUN python -m pip uninstall -y sageattention || true
+
+RUN cd /tmp/SageAttention-ada && \
+    python -m pip install -v --no-cache-dir --no-build-isolation --no-deps --force-reinstall . && \
+    python -c "import importlib, os, torch; from sageattention import sageattn; print('torch', torch.__version__, 'cuda', torch.version.cuda); print('cuda_home', os.environ.get('CUDA_HOME')); print('torch_cuda_arch_list', os.environ.get('TORCH_CUDA_ARCH_LIST')); print('sageattention import OK', sageattn); [print('import OK', m) for m in ('sageattention._qattn_sm89', 'sageattention._fused') for _ in (importlib.import_module(m),)]" && \
+    rm -rf /tmp/SageAttention-ada /root/.cache/pip
+
+RUN python - <<'PY'
+from pathlib import Path
+
+path = Path("/start.sh")
+text = path.read_text()
+old = "python -u /comfyui/main.py --disable-auto-launch --disable-metadata --log-stdout &"
+new = "python -u /comfyui/main.py --disable-auto-launch --disable-metadata --log-stdout ${COMFYUI_EXTRA_ARGS:-} &"
+
+if new in text:
+    raise SystemExit("start.sh already contains COMFYUI_EXTRA_ARGS")
+if old not in text:
+    raise SystemExit("ComfyUI start command not found in /start.sh")
+
+path.write_text(text.replace(old, new))
+PY

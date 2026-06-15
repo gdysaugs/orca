@@ -10,10 +10,11 @@ type Env = {
 }
 
 const corsMethods = 'POST, GET, OPTIONS'
-const DEFAULT_MMAUDIO_ENDPOINT = 'https://api.runpod.ai/v2/tf90vnnefy2q5m'
+const DEFAULT_MMAUDIO_ENDPOINT = 'https://api.runpod.ai/v2/8kch616iovemh8'
 const MMAUDIO_TARGET_FPS = 25
-const MAX_PROMPT_LENGTH = 500
+const MAX_PROMPT_LENGTH = 12000
 const MAX_VIDEO_BYTES = 30 * 1024 * 1024
+const MAX_VIDEO_SECONDS = 10
 const PIPELINE_USAGE_ID_MAX_LENGTH = 128
 const PIPELINE_USAGE_ID_MAX_AGE_MS = 15 * 60 * 1000
 const PIPELINE_USAGE_ID_PATTERN = /^media:(\d{13}):([A-Za-z0-9-]{16,96})$/
@@ -26,11 +27,11 @@ const ERR_PROMPT_REQUIRED = 'テキストを入力してください。'
 const ERR_PROMPT_TOO_LONG = `text is too long (max ${MAX_PROMPT_LENGTH}).`
 const ERR_VIDEO_REQUIRED = '動画データを入力してください。'
 const ERR_VIDEO_TOO_LARGE = `video is too large (max ${MAX_VIDEO_BYTES / (1024 * 1024)}MB).`
-const ERR_REQUEST_FAILED = '音声演出のリクエストに失敗しました。'
-const ERR_STATUS_FAILED = '音声演出の状態確認に失敗しました。'
+const ERR_REQUEST_FAILED = 'soundのリクエストに失敗しました。'
+const ERR_STATUS_FAILED = 'soundの状態確認に失敗しました。'
 const ERR_MUX_VIDEO_REQUIRED = '結合元の動画データが必要です。'
-const ERR_MUX_AUDIO_VIDEO_REQUIRED = '音声付き動画データが必要です。'
-const ERR_MUX_FAILED = '動画と音声の結合に失敗しました。'
+const ERR_MUX_AUDIO_VIDEO_REQUIRED = 'sound付き動画データが必要です。'
+const ERR_MUX_FAILED = '動画とsoundの結合に失敗しました。'
 
 const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -626,12 +627,32 @@ const buildMuxWorkflow = (videoFilename: string, audioVideoFilename: string) => 
   }
 }
 
+const buildStyle2Input = (
+  videoBase64: string,
+  videoExt: string,
+  prompt: string,
+  duration: number | undefined,
+) => ({
+  video_base64: videoBase64,
+  video_ext: videoExt,
+  prompt,
+  duration: Number.isFinite(Number(duration)) && Number(duration) > 0
+    ? Math.min(MAX_VIDEO_SECONDS, Number(duration))
+    : MAX_VIDEO_SECONDS,
+  randomize_seed: true,
+})
+
 const extractRunpodStatus = (payload: any) => {
   const raw = payload?.status ?? payload?.state ?? payload?.output?.status ?? payload?.result?.status
   return raw ? String(raw).toUpperCase() : 'UNKNOWN'
 }
 
 const isFailureStatus = (status: string) => ['FAILED', 'CANCELLED', 'TIMED_OUT', 'ERROR'].includes(String(status || '').toUpperCase())
+
+const isTerminalSuccessStatus = (status: string) => {
+  const normalized = String(status || '').toUpperCase()
+  return ['COMPLETED', 'COMPLETE', 'SUCCEEDED', 'SUCCESS', 'FINISHED'].includes(normalized)
+}
 
 const extractRunpodJobId = (payload: any) => {
   const raw = payload?.id ?? payload?.job_id ?? payload?.jobId ?? payload?.output?.id ?? payload?.output?.job_id
@@ -902,34 +923,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       return jsonResponse({ error: ERR_VIDEO_TOO_LARGE }, 413, corsHeaders)
     }
 
-    const negativePrompt = String(input?.negative_prompt ?? input?.negativePrompt ?? '').trim()
     const videoExt = normalizeVideoExt(input?.video_ext ?? input?.videoExt)
-    const videoName = String(input?.video_name ?? input?.videoName ?? `source${videoExt}`).trim() || `source${videoExt}`
-    const seed = parseOptionalNumber(input?.seed)
-    const steps = parseOptionalNumber(input?.steps)
-    const cfg = parseOptionalNumber(input?.cfg)
     const duration = parseOptionalNumber(input?.duration)
-    const maskAwayClip = parseOptionalBoolean(input?.mask_away_clip)
-    const forceOffload = parseOptionalBoolean(input?.force_offload)
 
-    runpodInput = {
-      workflow: buildDefaultWorkflow(videoName, text, {
-        negativePrompt,
-        seed,
-        steps,
-        cfg,
-        duration,
-        maskAwayClip,
-        forceOffload,
-      }),
-      uploads: [
-        {
-          name: videoName,
-          data: videoBase64,
-          mime: extensionToMime(videoExt),
-        },
-      ],
-    }
+    runpodInput = buildStyle2Input(videoBase64, videoExt, text, duration)
   }
 
   let runResult
@@ -967,6 +964,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if ('response' in charge) return charge.response
   let ticketsLeft: number | null = Number.isFinite(Number(charge.ticketsLeft)) ? Number(charge.ticketsLeft) : null
 
+  const output = extractVideoOutput(runResult.payload, { filenamePrefix: 'MMAudio' })
+  const missingOutput = isTerminalSuccessStatus(status) && !output.outputBase64
   if (isFailureStatus(status) || extractError(runResult.payload)) {
     const refundMeta = {
       source: 'run',
@@ -980,8 +979,19 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const nextTickets = Number((refund as { ticketsLeft?: unknown }).ticketsLeft)
     if (Number.isFinite(nextTickets)) ticketsLeft = nextTickets
   }
+  if (missingOutput) {
+    return jsonResponse(
+      {
+        error: 'sound付き動画を取得できませんでした。',
+        id: id || null,
+        status,
+        ticketsLeft,
+      },
+      502,
+      corsHeaders,
+    )
+  }
 
-  const output = extractVideoOutput(runResult.payload, { filenamePrefix: 'MMAudio' })
   const videoMime = output.outputFilename?.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4'
   const video = output.outputBase64 ? `data:${videoMime};base64,${output.outputBase64}` : null
 
@@ -1050,6 +1060,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const payload = statusResult.payload ?? {}
   const status = extractRunpodStatus(payload)
   let ticketsLeft: number | null = null
+  const output = extractVideoOutput(payload, { filenamePrefix: 'MMAudio' })
+  const missingOutput = isTerminalSuccessStatus(status) && !output.outputBase64
 
   if (isFailureStatus(status) || extractError(payload)) {
     const refundMeta = {
@@ -1065,7 +1077,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (Number.isFinite(nextTickets)) ticketsLeft = nextTickets
   }
 
-  const output = extractVideoOutput(payload, { filenamePrefix: 'MMAudio' })
   const videoMime = output.outputFilename?.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4'
   const video = output.outputBase64 ? `data:${videoMime};base64,${output.outputBase64}` : null
 
@@ -1080,7 +1091,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       ticketsLeft,
       delayTime: payload?.delayTime ?? null,
       executionTime: payload?.executionTime ?? null,
-      error: isFailureStatus(status) ? ERR_REQUEST_FAILED : null,
+      error: isFailureStatus(status) ? ERR_REQUEST_FAILED : missingOutput ? 'sound付き動画を取得できませんでした。' : null,
     },
     200,
     corsHeaders,
