@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import type { Session } from '@supabase/supabase-js'
 import { TopNav } from '../components/TopNav'
 import { fetchWithAuth } from '../lib/authFetch'
-import { saveGeneratedAsset } from '../lib/downloadMedia'
+import {
+  prepareGeneratedAsset,
+  saveGeneratedAsset,
+  type PreparedGeneratedAsset,
+} from '../lib/downloadMedia'
 import { isAuthConfigured, supabase } from '../lib/supabaseClient'
 import './camera.css'
 import './video-studio.css'
@@ -201,7 +205,7 @@ export function ImageEdit() {
   const [negativePrompt, setNegativePrompt] = useState('')
   const [anglePreset, setAnglePreset] = useState('none')
   const [cfg, setCfg] = useState(1)
-  const [resultImage, setResultImage] = useState<string | null>(null)
+  const [resultImage, setResultImage] = useState<PreparedGeneratedAsset | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
   const [isSavingResult, setIsSavingResult] = useState(false)
@@ -212,6 +216,7 @@ export function ImageEdit() {
   const [ticketMessage, setTicketMessage] = useState('')
   const [isPremiumMember, setIsPremiumMember] = useState(false)
   const runIdRef = useRef(0)
+  const resultImageRef = useRef<PreparedGeneratedAsset | null>(null)
 
   const accessToken = session?.access_token ?? ''
   const trimmedPrompt = prompt.trim()
@@ -234,6 +239,18 @@ export function ImageEdit() {
       }) as CSSProperties,
     [],
   )
+
+  const replaceResultImage = useCallback((next: PreparedGeneratedAsset | null) => {
+    const previous = resultImageRef.current
+    if (previous && previous !== next) previous.release()
+    resultImageRef.current = next
+    setResultImage(next)
+  }, [])
+
+  useEffect(() => () => {
+    resultImageRef.current?.release()
+    resultImageRef.current = null
+  }, [])
 
   useEffect(() => {
     if (!supabase) {
@@ -494,7 +511,7 @@ export function ImageEdit() {
     const runId = runIdRef.current + 1
     runIdRef.current = runId
     setIsRunning(true)
-    setResultImage(null)
+    replaceResultImage(null)
     setStatusMessage('画像を編集しています…')
 
     try {
@@ -502,7 +519,15 @@ export function ImageEdit() {
       if (runIdRef.current !== runId) return
 
       if ('images' in submitted && submitted.images?.length) {
-        setResultImage(submitted.images[0])
+        const preparedImage = await prepareGeneratedAsset({
+          source: submitted.images[0],
+          fallbackExtension: 'png',
+        })
+        if (runIdRef.current !== runId) {
+          preparedImage.release()
+          return
+        }
+        replaceResultImage(preparedImage)
         setStatusMessage('画像編集が完了しました。')
         if (accessToken) void fetchTickets()
         return
@@ -511,7 +536,15 @@ export function ImageEdit() {
       if (!submitted.jobId || !submitted.usageId) throw new Error('ジョブIDを取得できませんでした。')
       const image = await pollJob(submitted.jobId, submitted.usageId, runId)
       if (!image || runIdRef.current !== runId) return
-      setResultImage(image)
+      const preparedImage = await prepareGeneratedAsset({
+        source: image,
+        fallbackExtension: 'png',
+      })
+      if (runIdRef.current !== runId) {
+        preparedImage.release()
+        return
+      }
+      replaceResultImage(preparedImage)
       setStatusMessage('画像編集が完了しました。')
       if (accessToken) void fetchTickets()
     } catch (error) {
@@ -525,6 +558,7 @@ export function ImageEdit() {
     fetchTickets,
     hasEditInstruction,
     pollJob,
+    replaceResultImage,
     session,
     sourceFile,
     submitImageEdit,
@@ -533,18 +567,18 @@ export function ImageEdit() {
   ])
 
   const clearResult = useCallback(() => {
-    setResultImage(null)
+    replaceResultImage(null)
     setStatusMessage('')
-  }, [])
+  }, [replaceResultImage])
 
   const saveResult = useCallback(async () => {
     if (!resultImage || isSavingResult) return
     setIsSavingResult(true)
     try {
       await saveGeneratedAsset({
-        source: resultImage,
+        source: resultImage.url,
         filenamePrefix: 'orca-image-edit',
-        fallbackExtension: 'png',
+        fallbackExtension: resultImage.extension || 'png',
       })
     } finally {
       setIsSavingResult(false)
@@ -718,7 +752,7 @@ export function ImageEdit() {
           <div className="studio-canvas" style={viewerStyle}>
             {resultImage ? (
               <>
-                <img className="studio-result-media" src={resultImage} alt="編集画像" />
+                <img className="studio-result-media" src={resultImage.url} alt="編集画像" />
                 <button className="studio-save-btn" type="button" disabled={isSavingResult} onClick={saveResult}>
                   {isSavingResult ? '保存中' : '保存'}
                 </button>

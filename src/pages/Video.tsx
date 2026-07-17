@@ -9,7 +9,11 @@
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isAuthConfigured, supabase } from '../lib/supabaseClient'
-import { saveGeneratedAsset } from '../lib/downloadMedia'
+import {
+  prepareGeneratedAsset,
+  saveGeneratedAsset,
+  type PreparedGeneratedAsset,
+} from '../lib/downloadMedia'
 import { fetchWithAuth } from '../lib/authFetch'
 import { GET_CREDIT_PURCHASE_URL } from '../lib/externalLinks'
 import { TopNav } from '../components/TopNav'
@@ -902,7 +906,7 @@ export function Video() {
   const [videoLengthSeconds, setVideoLengthSeconds] = useState<VideoLengthSeconds>(DEFAULT_VIDEO_LENGTH_SECONDS as VideoLengthSeconds)
   const [width, setWidth] = useState(LANDSCAPE_MAX.width)
   const [height, setHeight] = useState(LANDSCAPE_MAX.height)
-  const [displayVideo, setDisplayVideo] = useState<string | null>(null)
+  const [displayVideo, setDisplayVideo] = useState<PreparedGeneratedAsset | null>(null)
   const [displayAudioVideo, setDisplayAudioVideo] = useState<string | null>(null)
   const [displayPipelineUsageId, setDisplayPipelineUsageId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
@@ -921,6 +925,7 @@ export function Video() {
   const [errorModalMessage, setErrorModalMessage] = useState<string | null>(null)
   const [isSavingResult, setIsSavingResult] = useState(false)
   const runIdRef = useRef(0)
+  const displayVideoRef = useRef<PreparedGeneratedAsset | null>(null)
 
   const accessToken = session?.access_token ?? ''
   const selectedVideoModel = VIDEO_MODELS[DEFAULT_VIDEO_MODEL]
@@ -951,7 +956,7 @@ export function Video() {
       !isRunning &&
       session,
   )
-  const isGif = displayVideo?.startsWith('data:image/gif')
+  const isGif = displayVideo?.extension === 'gif'
   const loadingSubtitle = useMemo(() => {
     if (hasSfxPrompt) {
       return '動画生成 → sound生成を実行中です。'
@@ -966,6 +971,19 @@ export function Video() {
       }) as CSSProperties,
     [height, width],
   )
+
+  const replaceDisplayVideo = useCallback((next: PreparedGeneratedAsset | null) => {
+    const previous = displayVideoRef.current
+    if (previous && previous !== next) previous.release()
+    displayVideoRef.current = next
+    setDisplayVideo(next)
+  }, [])
+
+  useEffect(() => () => {
+    runIdRef.current += 1
+    displayVideoRef.current?.release()
+    displayVideoRef.current = null
+  }, [])
 
   const updateLoraStrength = useCallback(
     (id: LoraOptionId, value: number) => {
@@ -1646,7 +1664,7 @@ export function Video() {
       runIdRef.current = runId
       setIsRunning(true)
       setStatusMessage('動画を生成中です…')
-      setDisplayVideo(null)
+      replaceDisplayVideo(null)
       setDisplayAudioVideo(null)
       setDisplayPipelineUsageId(null)
       let fallbackVideo: string | null = null
@@ -1675,7 +1693,15 @@ export function Video() {
         fallbackVideo = baseVideo
 
         if (!shouldRunSfx) {
-          setDisplayVideo(baseVideo)
+          const preparedVideo = await prepareGeneratedAsset({
+            source: baseVideo,
+            fallbackExtension: baseVideo.startsWith('data:image/gif') ? 'gif' : 'mp4',
+          })
+          if (runIdRef.current !== runId) {
+            preparedVideo.release()
+            return
+          }
+          replaceDisplayVideo(preparedVideo)
           setDisplayAudioVideo(null)
           setDisplayPipelineUsageId(null)
           setStatusMessage('動画生成が完了しました。')
@@ -1689,7 +1715,15 @@ export function Video() {
           setStatusMessage('sound付き動画を生成中です…')
           const fxVideo = await runMMAudioPipeline(baseVideo, trimmedSfx, runId, pipelineUsageId, selectedVideoLength.seconds)
           if (!fxVideo || runIdRef.current !== runId) return
-          setDisplayVideo(fxVideo)
+          const preparedVideo = await prepareGeneratedAsset({
+            source: fxVideo,
+            fallbackExtension: fxVideo.startsWith('data:image/gif') ? 'gif' : 'mp4',
+          })
+          if (runIdRef.current !== runId) {
+            preparedVideo.release()
+            return
+          }
+          replaceDisplayVideo(preparedVideo)
           setDisplayAudioVideo(null)
           setDisplayPipelineUsageId(null)
           fallbackVideo = fxVideo
@@ -1700,7 +1734,15 @@ export function Video() {
           return
         }
 
-        setDisplayVideo(baseVideo)
+        const preparedVideo = await prepareGeneratedAsset({
+          source: baseVideo,
+          fallbackExtension: baseVideo.startsWith('data:image/gif') ? 'gif' : 'mp4',
+        })
+        if (runIdRef.current !== runId) {
+          preparedVideo.release()
+          return
+        }
+        replaceDisplayVideo(preparedVideo)
         setStatusMessage('動画生成が完了しました。')
 
         if (accessToken) {
@@ -1711,8 +1753,20 @@ export function Video() {
         const message = normalizeErrorMessage(error instanceof Error ? error.message : error)
         if (message !== 'TICKET_SHORTAGE') {
           if (fallbackVideo) {
-            setDisplayVideo(fallbackVideo)
-            setStatusMessage(`一部処理でエラーが発生したため、途中結果を表示しています。${message}`)
+            try {
+              const preparedFallback = await prepareGeneratedAsset({
+                source: fallbackVideo,
+                fallbackExtension: fallbackVideo.startsWith('data:image/gif') ? 'gif' : 'mp4',
+              })
+              if (runIdRef.current !== runId) {
+                preparedFallback.release()
+                return
+              }
+              replaceDisplayVideo(preparedFallback)
+              setStatusMessage(`一部処理でエラーが発生したため、途中結果を表示しています。${message}`)
+            } catch {
+              setStatusMessage(message)
+            }
           } else {
             setStatusMessage(message)
           }
@@ -1727,6 +1781,7 @@ export function Video() {
       accessToken,
       fetchTickets,
       pollJob,
+      replaceDisplayVideo,
       runMMAudioPipeline,
       isSfxEnabled,
       session,
@@ -1741,11 +1796,11 @@ export function Video() {
     setSourcePreview(null)
     setSourcePayload(null)
     setSourceName('')
-    setDisplayVideo(null)
+    replaceDisplayVideo(null)
     setDisplayAudioVideo(null)
     setDisplayPipelineUsageId(null)
     setStatusMessage('')
-  }, [])
+  }, [replaceDisplayVideo])
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -1810,31 +1865,35 @@ export function Video() {
   const handleSaveResult = useCallback(async () => {
     if (!displayVideo || isSavingResult) return
     setIsSavingResult(true)
-    let temporarySource: string | null = null
+    let temporaryAsset: PreparedGeneratedAsset | null = null
     try {
-      let sourceToSave = displayVideo
+      let sourceToSave = displayVideo.url
+      let extension = displayVideo.extension || (isGif ? 'gif' : 'mp4')
       if (displayAudioVideo) {
         if (!displayPipelineUsageId) {
           throw new Error('sound付き動画のMP4保存情報が見つかりません。再生成してから保存してください。')
         }
         setStatusMessage('sound付き動画をMP4保存用に結合中です…')
-        sourceToSave = await runMMAudioMuxPipeline(displayVideo, displayAudioVideo, displayPipelineUsageId)
+        const muxedVideo = await runMMAudioMuxPipeline(displayVideo.url, displayAudioVideo, displayPipelineUsageId)
+        temporaryAsset = await prepareGeneratedAsset({ source: muxedVideo, fallbackExtension: 'mp4' })
+        sourceToSave = temporaryAsset.url
+        extension = temporaryAsset.extension || 'mp4'
       }
 
       if (!sourceToSave) return
-      temporarySource = displayAudioVideo && sourceToSave.startsWith('blob:') ? sourceToSave : null
 
       await saveGeneratedAsset({
         source: sourceToSave,
         filenamePrefix: 'orcaai-video',
-        fallbackExtension: isGif ? 'gif' : 'mp4',
+        fallbackExtension: extension,
       })
       setStatusMessage(displayAudioVideo ? 'sound付き動画をMP4で保存しました。' : '動画を保存しました。')
     } catch (error) {
       setStatusMessage(normalizeErrorMessage(error instanceof Error ? error.message : error))
     } finally {
-      if (temporarySource) {
-        URL.revokeObjectURL(temporarySource)
+      if (temporaryAsset) {
+        const assetToRelease = temporaryAsset
+        window.setTimeout(() => assetToRelease.release(), 60_000)
       }
       setIsSavingResult(false)
     }
@@ -2104,11 +2163,11 @@ export function Video() {
                   {isSavingResult ? '保存中' : '保存'}
                 </button>
                 {isGif ? (
-                  <img src={displayVideo} alt="生成動画" />
+                  <img src={displayVideo.url} alt="生成動画" />
                 ) : displayAudioVideo ? (
-                  <SyncedVideoPlayer videoSrc={displayVideo} audioSrc={displayAudioVideo} />
+                  <SyncedVideoPlayer videoSrc={displayVideo.url} audioSrc={displayAudioVideo} />
                 ) : (
-                  <video controls controlsList="nodownload" src={displayVideo} />
+                  <video controls controlsList="nodownload" src={displayVideo.url} />
                 )}
               </div>
             ) : (
