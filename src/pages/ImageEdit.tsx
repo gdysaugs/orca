@@ -749,7 +749,7 @@ export function ImageEdit() {
             <span>{resultImage ? '完了' : isRunning ? '編集中' : '待機中'}</span>
           </div>
 
-          <div className="studio-canvas" style={viewerStyle}>
+          <div className={`studio-canvas${resultImage ? ' studio-canvas--image-result' : ''}`} style={viewerStyle}>
             {resultImage ? (
               <>
                 <img className="studio-result-media" src={resultImage.url} alt="編集画像" />

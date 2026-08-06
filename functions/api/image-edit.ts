@@ -7,6 +7,8 @@ type PagesFunction<Env = unknown> = (context: { request: Request; env: Env }) =>
 type SupabaseAdmin = any
 
 type Env = {
+  RUNPOD_FLUX_KLEIN_POD_ENDPOINT_URL?: string
+  RUNPOD_FLUX_KLEIN_POD_API_KEY?: string
   RUNPOD_API_KEY?: string
   RUNPOD_SUPER_IMAGE_EDIT_API_KEY?: string
   RUNPOD_SUPER_IMAGE_EDIT_ENDPOINT_URL?: string
@@ -32,7 +34,7 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_REFERENCE_IMAGES = 1
 const MAX_PROMPT_LENGTH = 1000
 const MAX_NEGATIVE_PROMPT_LENGTH = 1000
-const DEFAULT_ENDPOINT = 'https://api.runpod.ai/v2/waeacog3y0gk1e'
+const DEFAULT_ENDPOINT = 'https://6zdipz8ty93nus-8000.proxy.runpod.net'
 const DEFAULT_CFG = 1
 const FIXED_STEPS = 4
 const FIXED_MEGAPIXELS = 1
@@ -135,9 +137,12 @@ const normalizeEndpoint = (value?: string) => {
 }
 
 const resolveEndpoint = (env: Env) =>
-  normalizeEndpoint(env.RUNPOD_SUPER_IMAGE_EDIT_ENDPOINT_URL) || DEFAULT_ENDPOINT
+  normalizeEndpoint(env.RUNPOD_FLUX_KLEIN_POD_ENDPOINT_URL) ||
+  normalizeEndpoint(env.RUNPOD_SUPER_IMAGE_EDIT_ENDPOINT_URL) ||
+  DEFAULT_ENDPOINT
 
-const resolveRunpodApiKey = (env: Env) => (env.RUNPOD_SUPER_IMAGE_EDIT_API_KEY || env.RUNPOD_API_KEY || '').trim()
+const resolveRunpodApiKey = (env: Env) =>
+  (env.RUNPOD_FLUX_KLEIN_POD_API_KEY || env.RUNPOD_SUPER_IMAGE_EDIT_API_KEY || env.RUNPOD_API_KEY || '').trim()
 
 const isFile = (value: FormDataEntryValue | null): value is File => value instanceof File
 

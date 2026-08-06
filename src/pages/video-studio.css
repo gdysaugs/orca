@@ -1481,6 +1481,17 @@
   z-index: 1;
 }
 
+.studio-canvas--image-result {
+  aspect-ratio: auto;
+}
+
+.studio-canvas--image-result .studio-result-media {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+}
+
 .studio-save-btn {
   position: absolute;
   top: 10px;
