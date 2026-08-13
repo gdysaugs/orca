@@ -19,3 +19,21 @@ input,
 textarea {
   font: inherit;
 }
+
+/* Legacy service migration notice */
+.service-migration-backdrop { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; padding: 20px; background: rgba(8,10,18,.72); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.service-migration-dialog { position: relative; width: min(100%,540px); max-height: calc(100dvh - 28px); overflow-y: auto; padding: 34px; color: #182033; background: linear-gradient(145deg,rgba(255,255,255,.99),rgba(245,247,255,.98)); border: 1px solid rgba(111,92,255,.22); border-radius: 26px; box-shadow: 0 28px 80px rgba(0,0,0,.28); }
+.service-migration-dialog::before { content: ''; position: absolute; inset: 0 0 auto; height: 5px; background: linear-gradient(90deg,#725cff,#2db9ff,#725cff); }
+.service-migration-badge { display: inline-flex; padding: 6px 10px; color: #6552dc; background: #eeebff; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.service-migration-dialog h2 { margin: 16px 40px 16px 0; font-size: clamp(24px,5vw,32px); line-height: 1.25; }
+.service-migration-dialog p { margin: 0 0 14px; color: #535d73; font-size: 15px; line-height: 1.85; }
+.service-migration-dialog p strong { color: #5845d5; }
+.service-migration-close { position: absolute; top: 18px; right: 18px; width: 38px; height: 38px; padding: 0; color: #667085; background: #eef0f6; border: 0; border-radius: 50%; font-size: 26px; line-height: 1; cursor: pointer; }
+.service-migration-workflows { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 18px 0; padding: 14px; background: #f0f2ff; border: 1px solid #dddfff; border-radius: 15px; }
+.service-migration-workflows > strong { grid-column: 1/-1; color: #343d55; font-size: 13px; }
+.service-migration-workflows a { display: grid; min-height: 44px; place-items: center; padding: 8px; color: #5747c9; background: #fff; border: 1px solid #d9d9fa; border-radius: 10px; font-size: 12px; font-weight: 800; text-align: center; text-decoration: none; }
+.service-migration-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 24px; }
+.service-migration-actions a,.service-migration-actions button { display: grid; min-height: 50px; place-items: center; padding: 0 20px; border-radius: 14px; font: inherit; font-weight: 800; text-decoration: none; cursor: pointer; }
+.service-migration-primary { color: #fff; background: linear-gradient(135deg,#765cff,#4f7cff); box-shadow: 0 12px 26px rgba(91,82,224,.28); }
+.service-migration-actions button { color: #4f586c; background: #eef0f6; border: 0; }
+@media (max-width:560px) { .service-migration-backdrop { padding: 14px; } .service-migration-dialog { padding: 28px 20px 22px; border-radius: 22px; } .service-migration-workflows,.service-migration-actions { grid-template-columns: 1fr; } }

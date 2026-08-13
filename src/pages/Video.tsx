@@ -1168,6 +1168,8 @@ export function Video() {
   }, [isRunning])
 
   const handleClaimDailyBonus = useCallback(async () => {
+    window.dispatchEvent(new CustomEvent('orca:show-service-migration'))
+    return
     if (!session || isClaimingDailyBonus) return
 
     setIsClaimingDailyBonus(true)
@@ -1826,6 +1828,8 @@ export function Video() {
   }
 
   const handleGenerate = async () => {
+    window.dispatchEvent(new CustomEvent('orca:show-service-migration'))
+    return
     if (!sourcePayload || isRunning) return
     if (!session) {
       setStatusMessage('先にGoogleログインしてください。')

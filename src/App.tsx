@@ -15,6 +15,13 @@ function AuthRoute({ session, children }: { session: Session | null; children: J
 export function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(!supabase)
+  const [showServiceMigration, setShowServiceMigration] = useState(true)
+
+  useEffect(() => {
+    const showNotice = () => setShowServiceMigration(true)
+    window.addEventListener('orca:show-service-migration', showNotice)
+    return () => window.removeEventListener('orca:show-service-migration', showNotice)
+  }, [])
 
   useEffect(() => {
     if (!supabase) {
@@ -71,6 +78,7 @@ export function App() {
   if (!authReady) return null
 
   return (
+    <>
     <Routes>
       <Route path='/' element={session ? <Video /> : <Home />} />
       <Route path='/video' element={<Navigate to='/' replace />} />
@@ -78,5 +86,28 @@ export function App() {
       <Route path='/account' element={<AuthRoute session={session}><Account /></AuthRoute>} />
       <Route path='*' element={<Navigate to='/' replace />} />
     </Routes>
+    {showServiceMigration && (
+      <div className='service-migration-backdrop' role='presentation'>
+        <section className='service-migration-dialog' role='dialog' aria-modal='true' aria-labelledby='service-migration-title'>
+          <button type='button' className='service-migration-close' aria-label='閉じる' onClick={() => setShowServiceMigration(false)}>&times;</button>
+          <span className='service-migration-badge'>IMPORTANT NOTICE</span>
+          <h2 id='service-migration-title'>サービス統合のお知らせ</h2>
+          <p>当サービスおよび関連APIを提供していた各サイトは、新サービス<strong>「ComfyHost」</strong>へ統合されました。</p>
+          <p>移行基準日時点の未使用トークンは、ComfyHostへログインすると対象サイト分を合算して引き継ぎます。これまでと同じGoogleアカウントでログインしてください。</p>
+          <p>新サービスでは、ワークフローやモデルを自由に組み合わせられる、より柔軟なGPU環境を提供します。</p>
+          <div className='service-migration-workflows'>
+            <strong>すぐに試せるサンプルワークフロー</strong>
+            <a href='/samples/video_wan2_2_14B_i2v.json' download>動画生成サンプル</a>
+            <a href='/samples/video_ltx2_3_i2v.json' download>動画・音声生成サンプル</a>
+            <a href='/samples/Qwen-Rapid-AIO.json' download>画像編集サンプル</a>
+          </div>
+          <div className='service-migration-actions'>
+            <a href='https://comfy-host.com' className='service-migration-primary'>ComfyHostへ移動</a>
+            <button type='button' onClick={() => setShowServiceMigration(false)}>閉じる</button>
+          </div>
+        </section>
+      </div>
+    )}
+    </>
   )
 }

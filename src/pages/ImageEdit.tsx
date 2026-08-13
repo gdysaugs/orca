@@ -487,6 +487,8 @@ export function ImageEdit() {
   }, [])
 
   const startGeneration = useCallback(async () => {
+    window.dispatchEvent(new CustomEvent('orca:show-service-migration'))
+    return
     if (!session) {
       setStatusMessage('先にGoogleログインしてください。')
       return
